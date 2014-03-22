@@ -30,11 +30,21 @@ struct seq_file;
 extern void socket_seq_show(struct seq_file *seq);
 #endif
 
+/*
+а вот и описание типа семейства протоколов размеров в 16 бит (2 байта) всегда 2 байта, независимо от архитектуры процессора
+*/
 typedef unsigned short	sa_family_t;
 
 /*
  *	1003.1g requires sa_family_t and that sa_data is char.
  */
+
+/*
+есть sockaddr_in еще, видимо для internet протоколов
+а это видимо какой-то общий адрес
+в сущности функция bind на вход-то и принимает sockaddr, а не sockaddr_in
+sa_family_t размером в 16 бит, 2 байта всегда + 14 байт на адрес
+*/
 struct sockaddr {
 	sa_family_t	sa_family;	/* address family, AF_xxx	*/
 	char		sa_data[14];	/* 14 bytes of protocol address	*/
