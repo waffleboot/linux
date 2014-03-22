@@ -180,12 +180,11 @@ struct in_pktinfo
 #define __SOCK_SIZE__	16		/* sizeof(struct sockaddr)	*/
 struct sockaddr_in {
   sa_family_t		sin_family;	/* Address family		*/
-  __be16		sin_port;	/* Port number			*/
+  __be16			sin_port;	/* Port number			*/
   struct in_addr	sin_addr;	/* Internet address		*/
 
   /* Pad to size of `struct sockaddr'. */
-  unsigned char		__pad[__SOCK_SIZE__ - sizeof(short int) -
-			sizeof(unsigned short int) - sizeof(struct in_addr)];
+  unsigned char		__pad[__SOCK_SIZE__ - sizeof(short int) - sizeof(unsigned short int) - sizeof(struct in_addr)];
 };
 #define sin_zero	__pad		/* for BSD UNIX comp. -FvK	*/
 

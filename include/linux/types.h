@@ -1,3 +1,7 @@
+/*
+это файл include/linux/types.h
+*/
+
 #ifndef _LINUX_TYPES_H
 #define _LINUX_TYPES_H
 
@@ -110,6 +114,9 @@ typedef		__u8		u_int8_t;
 typedef		__s8		int8_t;
 typedef		__u16		u_int16_t;
 typedef		__s16		int16_t;
+/*
+кстати, int32_t и u_int32_t это типы unsigned int и просто int
+*/
 typedef		__u32		u_int32_t;
 typedef		__s32		int32_t;
 
@@ -166,6 +173,13 @@ typedef unsigned long blkcnt_t;
  * any application/library that wants linux/types.h.
  */
 
+/*
+есть специальная тулза, Sparse для анализа кода и ядро можно собрать с использованием этого анализитора или без него
+определяется __bitwise__
+определяется __bitwise
+это как-то связано с big-little-endian
+*/
+
 #ifdef __CHECKER__
 #define __bitwise__ __attribute__((bitwise))
 #else
@@ -179,6 +193,12 @@ typedef unsigned long blkcnt_t;
 
 typedef __u16 __bitwise __le16;
 typedef __u16 __bitwise __be16;
+/*
+а вот и наши знакомые, __le32 и __be32
+in_addr.s_addr описан как __be32, развернем его
+__u32 для каждой архитектуры свой, для x86 это unsigned int
+unsigned int __attribute__((bitwise)) __be32
+*/
 typedef __u32 __bitwise __le32;
 typedef __u32 __bitwise __be32;
 #if defined(__GNUC__) && !defined(__STRICT_ANSI__)

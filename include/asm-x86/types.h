@@ -1,3 +1,6 @@
+/*
+это файл include/asm-x86/types.h
+*/
 #ifndef _ASM_X86_TYPES_H
 #define _ASM_X86_TYPES_H
 
@@ -13,9 +16,18 @@ typedef unsigned short umode_t;
 typedef __signed__ char __s8;
 typedef unsigned char __u8;
 
+/*
+sockaddr_in.sin_port
+получается размер порта всегда 2 байта, независимо от архитектуры процессора
+*/
 typedef __signed__ short __s16;
 typedef unsigned short __u16;
 
+/*
+и именно здесь __u32 описан как unsigned int, т.е. без знаковый 32 битный
+неясно теперь, где описан __signed__
+видимо __signed__ нигде не описан, поэтому __s32 превращается в простое int __s32
+*/
 typedef __signed__ int __s32;
 typedef unsigned int __u32;
 
