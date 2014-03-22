@@ -191,6 +191,7 @@ typedef unsigned long blkcnt_t;
 #define __bitwise
 #endif
 
+/*unsigned short*/
 typedef __u16 __bitwise __le16;
 typedef __u16 __bitwise __be16;
 /*
