@@ -112,12 +112,22 @@ void prepare_namespace(void);
 	__attribute__((__section__(".initcall" level ".init"))) = fn
 
 /*
+ для сокет буферов все это разворачивается в следующее:
+ static initcall_t __initcall_sock_init1 __attribute_used__ __attribute__((__section__(".initcall1.init"))) = sock_init
+ */
+
+/*
  * A "pure" initcall has no dependencies on anything else, and purely
  * initializes variables that couldn't be statically initialized.
  *
  * This only exists for built-in code, not for modules.
  */
 #define pure_initcall(fn)		__define_initcall("0",fn,0)
+
+/*
+ если ядро не поддерживает модули
+ видимо сокет буферы это модуль ядра, круто
+ */
 
 #define core_initcall(fn)		__define_initcall("1",fn,1)
 #define core_initcall_sync(fn)		__define_initcall("1s",fn,1s)
@@ -206,6 +216,12 @@ void __init parse_early_param(void);
 #define module_exit(x)	__exitcall(x);
 
 #else /* MODULE */
+
+/*
+ а вот когда есть поддержка модулей
+ module_init(sock_init)
+ __initcall(sock_init)
+ */
 
 /* Don't use these in modules, but some people do... */
 #define core_initcall(fn)		module_init(fn)

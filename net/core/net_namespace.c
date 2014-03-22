@@ -15,8 +15,14 @@ static LIST_HEAD(pernet_list);
 static struct list_head *first_device = &pernet_list;
 static DEFINE_MUTEX(net_mutex);
 
+/*
+ а вот где хранится реальный список сетевых пространств
+ */
 LIST_HEAD(net_namespace_list);
 
+/*
+ здесь же описано начальное сетевое пространство
+ */
 struct net init_net;
 EXPORT_SYMBOL(init_net);
 
@@ -145,6 +151,11 @@ static void cleanup_net(struct work_struct *work)
 	net_free(net);
 }
 
+/*
+ а вот и реализация put_net
+ что-то шедулится
+ а ведь я умру
+ */
 void __put_net(struct net *net)
 {
 	/* Cleanup the network namespace in process context */

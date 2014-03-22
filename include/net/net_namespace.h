@@ -10,6 +10,9 @@
 
 struct proc_dir_entry;
 struct net_device;
+/*
+ описывает сетевое пространство
+ */
 struct net {
 	atomic_t		count;		/* To decided when the network
 						 *  namespace should be freed.
@@ -39,6 +42,10 @@ extern struct net init_net;
 #define INIT_NET_NS(net_ns)
 #endif
 
+/*
+ здесь хранятся все доступные сетевые пространства
+ точнее здесь описывается что где-то есть такое место
+ */
 extern struct list_head net_namespace_list;
 
 #ifdef CONFIG_NET
@@ -52,8 +59,19 @@ static inline struct net *copy_net_ns(unsigned long flags, struct net *net_ns)
 #endif
 
 #ifdef CONFIG_NET_NS
+/*
+ видимо можно сконфигурить ядро с сетевыми пространствами, либо все сделать глобальным
+ пока же вся разница в счетчике
+ */
 extern void __put_net(struct net *net);
 
+/*
+ counter используется как счетчик
+ т.е. при каждом get_net инкрементируется счетчик
+ непонятно только кто дергает get/put и зачем
+ врод counter определяет, нужно ли освобождать пространство
+ может это конфигурится?
+ */
 static inline struct net *get_net(struct net *net)
 {
 	atomic_inc(&net->count);
@@ -113,6 +131,10 @@ static inline struct net *maybe_get_net(struct net *net)
 }
 #endif
 
+/*
+ не понимаю, почему это не вынесено под макрос
+ а, все правильно, глобальный список и не под макросом
+ */
 #define for_each_net(VAR)				\
 	list_for_each_entry(VAR, &net_namespace_list, list)
 
@@ -126,6 +148,10 @@ static inline struct net *maybe_get_net(struct net *net)
 #define __net_initdata	__initdata
 #endif
 
+/*
+ необходимые операции над сетевыми пространствами
+ инициализация и очистка
+ */
 struct pernet_operations {
 	struct list_head list;
 	int (*init)(struct net *net);

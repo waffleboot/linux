@@ -2151,6 +2151,10 @@ void sock_unregister(int family)
 	printk(KERN_INFO "NET: Unregistered protocol family %d\n", family);
 }
 
+/*
+ вот оказывается где вызывается skb_init
+ какие-то SLAB кэши
+ */
 static int __init sock_init(void)
 {
 	/*
@@ -2182,6 +2186,9 @@ static int __init sock_init(void)
 	return 0;
 }
 
+/*
+ вот тоже интересная штука
+ */
 core_initcall(sock_init);	/* early initcall */
 
 #ifdef CONFIG_PROC_FS

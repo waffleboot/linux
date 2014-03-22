@@ -107,11 +107,18 @@ struct iphdr {
 #ifdef __KERNEL__
 #include <linux/skbuff.h>
 
+/*
+ а здесь вызывается сетевой
+ */
 static inline struct iphdr *ip_hdr(const struct sk_buff *skb)
 {
 	return (struct iphdr *)skb_network_header(skb);
 }
 
+// о, крутая штука видимо. когда ip кладется поверх ip
+// ipip, т.е. чтобы нужно было вытащить внутренний адрес, дергается транспортный уровень
+// это случай когда внутри ip трафика идет другой ip трафик
+// т.е. туннелирование, прикольно, оказывается можно прокидывать сети внутри сетей, главное канал настроить
 static inline struct iphdr *ipip_hdr(const struct sk_buff *skb)
 {
 	return (struct iphdr *)skb_transport_header(skb);

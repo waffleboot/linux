@@ -143,6 +143,9 @@ EXPORT_SYMBOL(skb_truesize_bug);
  *	Buffers may only be allocated from interrupts using a @gfp_mask of
  *	%GFP_ATOMIC.
  */
+/*
+ как странно, все же буфер создается в ядре?
+ */
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
 			    int fclone, int node)
 {
@@ -488,6 +491,12 @@ struct sk_buff *skb_clone(struct sk_buff *skb, gfp_t gfp_mask)
 
 static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 {
+/*
+ и действительно NET_SKBUFF_DATA_USES_OFFSET используется
+ если NET_SKBUFF_DATA_USES_OFFSET не определен, значит это 32 битная
+ значит размер и смещение нужно вычислять через разницу указателей
+ для 64 битных размер изначально есть
+ */
 #ifndef NET_SKBUFF_DATA_USES_OFFSET
 	/*
 	 *	Shift between the two data areas in bytes
@@ -2009,6 +2018,10 @@ err:
 
 EXPORT_SYMBOL_GPL(skb_segment);
 
+/*
+ о какая функция, создает какие-то кэши
+ интересно, кто вызывает эту функцию
+ */
 void __init skb_init(void)
 {
 	skbuff_head_cache = kmem_cache_create("skbuff_head_cache",

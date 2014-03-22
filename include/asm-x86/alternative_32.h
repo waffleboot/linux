@@ -130,7 +130,22 @@ static inline void alternatives_smp_switch(int smp) {}
 		"  .align 4\n"			\
 		"  .long 661f\n" /* address */	\
 		".previous\n"			\
-	       	"661:\n\tlock; "
+        "661:\n\tlock; "
+
+/*
+ не понимаю что тут написано
+ насколько я понимаю это используется as GNU Assembler
+ видимо код кладется в секцию, оборачивается
+ непонятно только перемещается ли код в секцию или просто оборачивается
+ "a" означает section is allocatable
+ .section определяет новую секцию
+ .section .smp_locks,"a"
+   .align 4
+   .long 661f
+ .previous
+ 661:
+    lock;
+ */
 
 #else /* ! CONFIG_SMP */
 #define LOCK_PREFIX ""

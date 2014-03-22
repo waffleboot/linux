@@ -19,6 +19,8 @@
 
 #include <linux/types.h>
 
+// заметим что используется сетевой big endian порядок байтов
+// под source dest указаны порты
 struct udphdr {
 	__be16	source;
 	__be16	dest;
@@ -29,6 +31,11 @@ struct udphdr {
 #ifdef __KERNEL__
 #include <linux/skbuff.h>
 
+/*
+ возвращает UDP заголовок
+ видимо для скорости udphdr описан также как в RFC
+ заметим что вызывается skb_transport_header, транспорт
+ */
 static inline struct udphdr *udp_hdr(const struct sk_buff *skb)
 {
 	return (struct udphdr *)skb_transport_header(skb);

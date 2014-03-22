@@ -66,6 +66,12 @@ static __inline__ void atomic_sub(int i, atomic_t *v)
 		:"ir" (i));
 }
 
+/*
+ __volatile__ нужен для того, чтобы as компилятор, ассемблер не производил оптимизации
+ __asm__ это ассемблерная вставка, чтобы не было конфликтов с другими именами используется __
+ __inline__ не делает функцию со всеми call/ret, а вставляет как есть, подстановка
+ */
+
 /**
  * atomic_sub_and_test - subtract value from variable and test result
  * @i: integer value to subtract
