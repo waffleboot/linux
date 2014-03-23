@@ -334,6 +334,14 @@ static int __init init_setup(char *str)
 	return 1;
 }
 __setup("init=", init_setup);
+/*
+ static char __setup_str_init_setup[] __initdata __aligned(1) = "init=";
+ static struct obs_kernel_param __setup_init_setup
+    __attribute_used__				\
+    __attribute__((__section__(".init.setup")))	\
+    __attribute__((aligned((sizeof(long)))))	\
+    = { __setup_str_init_setup, init_setup, 0 }
+ */
 
 static int __init rdinit_setup(char *str)
 {
@@ -387,6 +395,7 @@ static void __init setup_per_cpu_areas(void)
 #endif /* !__GENERIC_PER_CPU */
 
 /* Called by boot processor to activate the rest. */
+// а вот и активация остальных процов, ядро-то грузит только один
 static void __init smp_init(void)
 {
 	unsigned int cpu;
@@ -497,13 +506,14 @@ static void __init boot_cpu_init(void)
 	/* Mark the boot cpu "present", "online" etc for SMP and UP case */
 	cpu_set(cpu, cpu_online_map);
 	cpu_set(cpu, cpu_present_map);
-	cpu_set(cpu, cpu_possible_map);
+	cpu_set(cpu, cpu_possible_map); // а вот кстати и cpu_possible_map используется
 }
 
 void __init __attribute__((weak)) smp_setup_processor_id(void)
 {
 }
 
+// круто, вот только кто использует это?
 asmlinkage void __init start_kernel(void)
 {
 	char * command_line;
@@ -657,6 +667,14 @@ static int __init initcall_debug_setup(char *str)
 }
 __setup("initcall_debug", initcall_debug_setup);
 
+// каких-то два массива
+// оказывается внутри image ядра могут находится секции, которые используются загрузчиком для правильного распределения ядра по памяти
+// __mostly_read как раз для этого и используется, но видимо тут все определяется загрузчиком
+// аналогично горячая процедура в кэше инструкии должна быть рядом с другой горячей процедурой
+// секции описаны в ассемблере, а тут они просто дергаются
+// видимо выравнивание не нужно, хитрый способ задать список конструкторов
+// ну, наверное все это нужно чтобы ядро работало быстро и не тратило много памяти, поэтому секции могут выгружаться после загрузки
+// правда ядро должно знать что выгружать и понятие выгрузить это на самом деле просто использовать память этих структур, все равно что писать туда
 extern initcall_t __initcall_start[], __initcall_end[];
 
 static void __init do_initcalls(void)
@@ -678,7 +696,7 @@ static void __init do_initcalls(void)
 			t0 = ktime_get();
 		}
 
-		result = (*call)();
+		result = (*call)(); // а вот и инициализация в том числе и буферных сокетов
 
 		if (initcall_debug) {
 			t1 = ktime_get();
@@ -717,6 +735,9 @@ static void __init do_initcalls(void)
 
 	/* Make sure there is no pending stuff from the initcall sequence */
 	flush_scheduled_work();
+    // а вот это что такое? а, наверное они все параллельно могут запускаться
+    // это наверное ожидание
+    // предполагается что к этому моменту и система памяти и процессы уже настроены и их можно использовать чтобы запускать задачи
 }
 
 /*
@@ -725,6 +746,10 @@ static void __init do_initcalls(void)
  * running, and memory and process management works.
  *
  * Now we can finally start doing some real work..
+ */
+/*
+ в том числе могут инициализироваться и сокетные буферы
+ __init видимо указывает на еще одну секцию которую потом можно будет выгрузить
  */
 static void __init do_basic_setup(void)
 {
@@ -755,6 +780,15 @@ static void __init do_pre_smp_initcalls(void)
 		spawn_softlockup_task();
 }
 
+/*
+ а, я понял, дергается execve
+ насколько я помню из fork exec, fork порождает новый процесс, а exec полностью подменяет пространство процесса
+ т.е. полностью меняет его код
+ и насколько я понимаю run_init_process в случае успеха подменяет себя и ядро стартует, точнее стартуют init процессы
+ может быть поэтому и не надо выгружать init?
+ хорошо, получается в случае неудачи, если процесс найти не удалось, то и возникает паника
+ получается что к началу init процесса файловая система уже настроена и модули загружены
+ */
 static void run_init_process(char *init_filename)
 {
 	argv_init[0] = init_filename;
@@ -763,6 +797,10 @@ static void run_init_process(char *init_filename)
 
 /* This is a non __init function. Force it to be noinline otherwise gcc
  * makes it inline to init() and it becomes part of init.text section
+ а это плохо? ну станет частью .init.text, разве потом эта секция не будет выгружена?
+ */
+/*
+ noinline развернется в __attribute__((noinline))
  */
 static int noinline init_post(void)
 {
@@ -772,6 +810,7 @@ static int noinline init_post(void)
 	system_state = SYSTEM_RUNNING;
 	numa_default_policy();
 
+    // файловая система уже настроена
 	if (sys_open((const char __user *) "/dev/console", O_RDWR, 0) < 0)
 		printk(KERN_WARNING "Warning: unable to open an initial console.\n");
 
@@ -799,10 +838,14 @@ static int noinline init_post(void)
 	run_init_process("/etc/init");
 	run_init_process("/bin/init");
 	run_init_process("/bin/sh");
+    
+    // какие-то init процессы запускаются, я так понимаю все последовательно до первого успешного
+    // если не получилось, тогда паника
 
-	panic("No init found.  Try passing init= option to kernel.");
+	panic("No init found.  Try passing init= option to kernel."); // а вот этого я не понял
 }
 
+// интересная функция
 static int __init kernel_init(void * unused)
 {
 	lock_kernel();

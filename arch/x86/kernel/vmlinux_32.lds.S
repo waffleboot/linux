@@ -16,7 +16,7 @@
  */
 #define LOAD_OFFSET __PAGE_OFFSET
 
-#include <asm-generic/vmlinux.lds.h>
+#include <asm-generic/vmlinux.lds.h> // именно так вставляется INITCALLS
 #include <asm/thread_info.h>
 #include <asm/page.h>
 #include <asm/cache.h>
@@ -141,6 +141,10 @@ SECTIONS
 	*(.init.setup)
   	__setup_end = .;
    }
+// интересная секция создается .initcall.init
+// какой-то LOAD_OFFSET, создается по какому-то адресу
+// но главное это __initcall_start и __initcall_end
+// а это массивы объектов initcall_t
   .initcall.init : AT(ADDR(.initcall.init) - LOAD_OFFSET) {
   	__initcall_start = .;
 	INITCALLS

@@ -23,3 +23,7 @@ const struct file_operations bad_sock_fops = {
 	.owner = THIS_MODULE,
 	.open = sock_no_open,
 };
+
+/*
+ какая странная штука, позволяет вынести сетевую поддержку полностью из ядра наружу
+ */

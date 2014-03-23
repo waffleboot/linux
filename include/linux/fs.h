@@ -1573,6 +1573,7 @@ static inline void bd_forget(struct inode *inode) {}
 #endif
 extern const struct file_operations def_blk_fops;
 extern const struct file_operations def_chr_fops;
+// ссылка на nonet
 extern const struct file_operations bad_sock_fops;
 extern const struct file_operations def_fifo_fops;
 #ifdef CONFIG_BLOCK

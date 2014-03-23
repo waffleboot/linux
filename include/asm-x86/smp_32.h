@@ -117,6 +117,19 @@ do { } while (0)
  * so this is correct in the x86 case.
  */
 DECLARE_PER_CPU(int, cpu_number);
+// а это smp_processor_id()
+// percpu_from_op("mov", per_cpu__cpu_number)
+// не понимаю, вроде как FS регистр используется
+/*
+ т.е. в ret__ что-то кладется
+ typeof(per_cpu__cpu_number) ret__;
+ switch (sizeof(per_cpu__cpu_number)) {
+    asm("mov" "l "__percpu_seg"%1,%0"
+    : "=r" (ret__)
+    : "m" (var));
+ }
+ ret__;
+ */
 #define raw_smp_processor_id() (x86_read_percpu(cpu_number))
 
 extern cpumask_t cpu_callout_map;

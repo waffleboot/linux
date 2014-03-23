@@ -295,6 +295,11 @@ static int sockfs_get_sb(struct file_system_type *fs_type,
 
 static struct vfsmount *sock_mnt __read_mostly;
 
+/*
+ о, оказывается есть sockfs
+ где-то описано, что с помощью нее можно раздавать права доступа на порты, при этом
+ запись в файлы направляется в сокеты с помощью этой файловой системы
+ */
 static struct file_system_type sock_fs_type = {
 	.name =		"sockfs",
 	.get_sb =	sockfs_get_sb,
@@ -362,6 +367,13 @@ static int sock_alloc_fd(struct file **filep)
 	return fd;
 }
 
+/*
+ о какая штука, привязывает сокет к файлу
+ получается в дальнейшем можно просто писать в файл через write и все что будет записано в файл
+ будет направляться в сокет. т.е. системный вызов write на файловом дескрипторе будет направляться в сокет
+ видимо для этого и используется сокетная файловая система
+ а интересно, mmap тоже можно делать?
+ */
 static int sock_attach_fd(struct socket *sock, struct file *file)
 {
 	struct dentry *dentry;
@@ -531,6 +543,12 @@ void sock_release(struct socket *sock)
 		printk(KERN_ERR "sock_release: fasync list not empty!\n");
 
 	get_cpu_var(sockets_in_use)--;
+    
+    /*
+     т.е. захватывается переменная, берется адрес этой переменной, дальше разименование, инкремент на память, дальше освобождение
+     (*({ extern int simple_identifier_sockets_in_use(void); preempt_disable(); &__get_cpu_var(var); }))
+     */
+    
 	put_cpu_var(sockets_in_use);
 	if (!sock->file) {
 		iput(SOCK_INODE(sock));
@@ -2154,6 +2172,8 @@ void sock_unregister(int family)
 /*
  вот оказывается где вызывается skb_init
  какие-то SLAB кэши
+ инициализируются сокеты, сокетные буферы, протоколы?
+ и эта файловая система монтируется через kern_mount
  */
 static int __init sock_init(void)
 {
@@ -2192,19 +2212,53 @@ static int __init sock_init(void)
 core_initcall(sock_init);	/* early initcall */
 
 #ifdef CONFIG_PROC_FS
+// а здесь видимо конфигурится /proc и показывается количество сокетов
+// только почему-то считается на каждом процессоре
 void socket_seq_show(struct seq_file *seq)
 {
 	int cpu;
 	int counter = 0;
 
-	for_each_possible_cpu(cpu)
-	    counter += per_cpu(sockets_in_use, cpu);
+	for_each_possible_cpu(cpu) // это видимо макрос, который обходит все процессоры, а cpu это итерационная переменная
+        /*
+         for_each_possible_cpu разворачивается в 
+         for_each_cpu_mask(cpu, cpu_possible_map)
+         опять же все зависит от NR_CPUS
+         если CONFIG_SMP определено, то NR_CPUS = CONFIG_NR_CPUS иначе 1
+         
+         однопроцессорная система, cpu это просто счетчик, может быть даже битовый, а вот что такое cpu_possible_map?
+         for (cpu = 0; cpu < 1; cpu++, (void)cpu_possible_map)
+         здесь все просто, cpu просто принимает значение 0
+
+         многопроцессорная система
+         а вот здесь cpu не просто инкрементится на 1, а обходятся все значимые биты
+         for (cpu = __first_cpu(&cpu_possible_map); cpu < NR_CPUS; cpu = __next_cpu(cpu, &cpu_possible_map))
+         
+         int __first_cpu(const cpumask_t *srcp)
+         {
+            // возвращает минимальное из двух чисел
+            // а, да. биты же могут хранится не просто в байте, а использоваться целый регион памяти
+            // например 256 процессоров поддерживается. это значит что нужно обойти 8 байт и найти первый бит
+            // видимо где-то хранится битовая маска по процессорам
+            return ({ int x = NR_CPUS; int y = find_first_bit(cpu_possible_map->bits, NR_CPUS); x < y ? x : y; })
+         }
+         
+         int __next_cpu(int n, const cpumask_t *srcp)
+         return ({ int x = NR_CPUS; int y = find_next_bit(cpu_possible_map->bits, NR_CPUS, cpu+1); x < y ? x : y; })
+
+         в общем NR_CPUS это максимальное количество поддерживаемых процессоров
+         написано что это максимальное количество поддерживаемых процессоров в SMP
+         какой-то UML упоминается
+         на каждый CPU отводится 8K описания в ядре
+         */
+	    counter += per_cpu(sockets_in_use, cpu); // вот что такое sockets_in_use?
 
 	/* It can be negative, by the way. 8) */
 	if (counter < 0)
 		counter = 0;
 
 	seq_printf(seq, "sockets: used %d\n", counter);
+    // просто показывается количество сокетов, суммарное количество
 }
 #endif				/* CONFIG_PROC_FS */
 

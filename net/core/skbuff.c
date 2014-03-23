@@ -145,9 +145,11 @@ EXPORT_SYMBOL(skb_truesize_bug);
  */
 /*
  как странно, все же буфер создается в ядре?
+ не понимаю, что делает эта функция. и как работает фрагментация пакетов
+ кто определяет размер, сколько выделить места? в качестве node всегда передается -1
+ какой-то skbuff_head_cache
  */
-struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask,
-			    int fclone, int node)
+struct sk_buff *__alloc_skb(unsigned int size, gfp_t gfp_mask, int fclone, int node)
 {
 	struct kmem_cache *cache;
 	struct skb_shared_info *shinfo;

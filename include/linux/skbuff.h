@@ -286,8 +286,8 @@ struct sk_buff {
 	struct sk_buff		*prev;
 
     // указатель на сокет!
-	struct sock		*sk;
-	ktime_t			tstamp;
+	struct sock         *sk;
+	ktime_t             tstamp;
 	struct net_device	*dev;
 
 	struct  dst_entry	*dst;
@@ -301,10 +301,10 @@ struct sk_buff {
 	 */
 	char			cb[48];
 
-	unsigned int		len,
-				data_len;
+	unsigned int	len,
+                    data_len;
 	__u16			mac_len,
-				hdr_len;
+                    hdr_len;
 	union {
 		__wsum		csum;
 		struct {
@@ -314,26 +314,26 @@ struct sk_buff {
 	};
 	__u32			priority;
 	__u8			local_df:1,
-				cloned:1,
-				ip_summed:2,
-				nohdr:1,
-				nfctinfo:3;
+                    cloned:1,
+                    ip_summed:2,
+                    nohdr:1,
+                    nfctinfo:3;
 	__u8			pkt_type:3,
-				fclone:2,
-				ipvs_property:1,
-				nf_trace:1;
+                    fclone:2,
+                    ipvs_property:1,
+                    nf_trace:1;
 	__be16			protocol;
 
 	void			(*destructor)(struct sk_buff *skb);
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 	struct nf_conntrack	*nfct;
-	struct sk_buff		*nfct_reasm;
+	struct sk_buff	*nfct_reasm;
 #endif
 #ifdef CONFIG_BRIDGE_NETFILTER
 	struct nf_bridge_info	*nf_bridge;
 #endif
 
-	int			iif;
+	int             iif;
 #ifdef CONFIG_NETDEVICES_MULTIQUEUE
 	__u16			queue_mapping;
 #endif
@@ -346,7 +346,7 @@ struct sk_buff {
 	/* 2 byte hole */
 
 #ifdef CONFIG_NET_DMA
-	dma_cookie_t		dma_cookie;
+	dma_cookie_t	dma_cookie;
 #endif
 #ifdef CONFIG_NETWORK_SECMARK
 	__u32			secmark;
@@ -361,7 +361,7 @@ struct sk_buff {
      и skbuff хранит данные размером с eth наверное, остальное в других skbuff
      в сущности логично, ведь в пакет больше не влезет, получается размер определяется размером MTU
      */
-	sk_buff_data_t		transport_header;
+	sk_buff_data_t      transport_header;
 	sk_buff_data_t		network_header;
 	sk_buff_data_t		mac_header;
 	/* These elements must be at the end, see alloc_skb() for details.  */
@@ -402,16 +402,17 @@ struct sk_buff {
 
 extern void kfree_skb(struct sk_buff *skb);
 extern void	       __kfree_skb(struct sk_buff *skb);
-extern struct sk_buff *__alloc_skb(unsigned int size,
-				   gfp_t priority, int fclone, int node);
-static inline struct sk_buff *alloc_skb(unsigned int size,
-					gfp_t priority)
+// есть внешняя функция __alloc_skb выделяющая сокетный буфер и создающая сокетный буфер
+// что за GFP я не понимаю
+extern struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int fclone, int node);
+// и две функции, собственно alloc_skb и клонирующая сокетный буфер
+// что интересно, обе в качестве NUMA node передают -1
+static inline struct sk_buff *alloc_skb(unsigned int size, gfp_t priority)
 {
 	return __alloc_skb(size, priority, 0, -1);
 }
 
-static inline struct sk_buff *alloc_skb_fclone(unsigned int size,
-					       gfp_t priority)
+static inline struct sk_buff *alloc_skb_fclone(unsigned int size, gfp_t priority)
 {
 	return __alloc_skb(size, priority, 1, -1);
 }

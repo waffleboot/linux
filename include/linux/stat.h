@@ -28,6 +28,10 @@
 #define S_ISBLK(m)	(((m) & S_IFMT) == S_IFBLK)
 #define S_ISFIFO(m)	(((m) & S_IFMT) == S_IFIFO)
 #define S_ISSOCK(m)	(((m) & S_IFMT) == S_IFSOCK)
+// последнее транслируется в
+// (mode & S_IFMT) == S_IFSOCK
+// а S_IFSOCK описан выше
+// хер его знает зачем это нужно
 
 #define S_IRWXU 00700
 #define S_IRUSR 00400

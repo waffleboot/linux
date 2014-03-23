@@ -443,6 +443,7 @@ static void __cpuinit start_secondary(void *unused)
  * CPUs - they just need to reload everything
  * from the task structure
  * This function must not return.
+ я так понимаю остальные процессоры просто крутят idle?
  */
 void __devinit initialize_secondary(void)
 {

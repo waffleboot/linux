@@ -390,6 +390,11 @@ is386:	movl $2,%ecx		# set MP
 	cld			# gcc2 wants the direction flag cleared at all times
 	pushl $0		# fake return address for unwinder
 #ifdef CONFIG_SMP
+/*
+ а вот это интересная штука
+ только один процесс загружает ядро
+ неясно только, нет ли тут гонки
+ */
 	movb ready, %cl
 	movb $1, ready
 	cmpb $0,%cl		# the first CPU calls start_kernel
@@ -400,6 +405,7 @@ is386:	movl $2,%ecx		# set MP
 1:
 #endif /* CONFIG_SMP */
 	jmp start_kernel
+// а вот кстати и загрузка ядра! не случайно start_kernel собрана с asmlinkage
 
 /*
  * We depend on ET to be correct. This checks for 287/387.

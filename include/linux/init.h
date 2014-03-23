@@ -40,6 +40,9 @@
 
 /* These are for everybody (although not all archs will actually
    discard it in modules) */
+// а вот и описание секции для инициализации ядра, потом будет выкинута из памяти
+// __cold разворачивается в __attribute__(cold) чтобы сказать что процедура редко используется и поэтому ее нужно оптимизировать под размер, а не скорость
+// нужно оптимизировать именно под размер, чтобы image ядра занимал меньше места
 #define __init		__attribute__ ((__section__ (".init.text"))) __cold
 #define __initdata	__attribute__ ((__section__ (".init.data")))
 #define __exitdata	__attribute__ ((__section__(".exit.data")))
@@ -75,6 +78,10 @@
 #ifndef __ASSEMBLY__
 /*
  * Used for initialization calls..
+ */
+/*
+ и да, initcall_t описан как указатель на функцию без аргументов, возвращающую int
+ все это потом дергается в inti/main.c
  */
 typedef int (*initcall_t)(void);
 typedef void (*exitcall_t)(void);
@@ -113,7 +120,9 @@ void prepare_namespace(void);
 
 /*
  для сокет буферов все это разворачивается в следующее:
+ создается секция .initcall1.init где хранится __initcall_sock_init1 переменная указывающая на сокет инит
  static initcall_t __initcall_sock_init1 __attribute_used__ __attribute__((__section__(".initcall1.init"))) = sock_init
+ все это кладется в секцию, потом похожие секции сцепляются друг за другом и загрузчик ядра последовательно выполняет их
  */
 
 /*
@@ -127,6 +136,8 @@ void prepare_namespace(void);
 /*
  если ядро не поддерживает модули
  видимо сокет буферы это модуль ядра, круто
+ смотри vmlinux.lds.h
+ там перечислены все эти секции
  */
 
 #define core_initcall(fn)		__define_initcall("1",fn,1)
