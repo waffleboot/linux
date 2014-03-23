@@ -1,3 +1,6 @@
+/*
+ образец сетевого драйвера!
+ */
 /* isa-skeleton.c: A network driver outline for linux.
  *
  *	Written 1993-94 by Donald Becker.

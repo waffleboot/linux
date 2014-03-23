@@ -3686,6 +3686,7 @@ int register_netdevice(struct net_device *dev)
 		}
 	}
 
+    // походу дела регистрируем в sysfs
 	ret = netdev_register_kobject(dev);
 	if (ret)
 		goto err_uninit;
@@ -3731,6 +3732,9 @@ err_uninit:
  *	This is a wrapper around register_netdevice that takes the rtnl semaphore
  *	and expands the device name if you passed a format string to
  *	alloc_netdev.
+ */
+/*
+ процедура, с помощью которой регистрируется сетевая карта
  */
 int register_netdev(struct net_device *dev)
 {

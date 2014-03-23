@@ -250,6 +250,7 @@ struct hh_cache
 #define LL_RESERVED_SPACE_EXTRA(dev,extra) \
 	((((dev)->hard_header_len+extra)&~(HH_DATA_MOD - 1)) + HH_DATA_MOD)
 
+// тоже важная структура
 struct header_ops {
 	int	(*create) (struct sk_buff *skb, struct net_device *dev,
 			   unsigned short type, const void *daddr,
@@ -445,6 +446,11 @@ static inline void napi_synchronize(const struct napi_struct *n)
  *	moves out.
  */
 
+/*
+ занятный комментарий выше
+ но это структура описывающая сетевую карту
+ где-то видимо создается и loopback
+ */
 struct net_device
 {
 
@@ -562,6 +568,7 @@ struct net_device
 	unsigned char		link_mode; /* mapping policy to operstate */
 
 	unsigned		mtu;	/* interface MTU value		*/
+    // см. if_arp.h
 	unsigned short		type;	/* interface hardware type	*/
 	unsigned short		hard_header_len;	/* hardware hdr length	*/
 
@@ -571,6 +578,7 @@ struct net_device
 
 	/* Interface address info. */
 	unsigned char		perm_addr[MAX_ADDR_LEN]; /* permanent hw address */
+    // длина MAC адреса
 	unsigned char		addr_len;	/* hardware address length	*/
 	unsigned short          dev_id;		/* for shared network cards */
 
@@ -599,6 +607,7 @@ struct net_device
  */
 	unsigned long		last_rx;	/* Time of last Rx	*/
 	/* Interface address info used in eth_type_trans() */
+    // MAC адрес
 	unsigned char		dev_addr[MAX_ADDR_LEN];	/* hw address, (before bcast 
 							because most packets are unicast) */
 

@@ -75,6 +75,11 @@ __setup("ether=", netdev_boot_setup);
  * Set the protocol type. For a packet of type ETH_P_802_3 we put the length
  * in here instead. It is up to the 802.2 layer to carry protocol information.
  */
+/*
+ о, что нашел. эта штука заполняет eth заголовок
+ зачем только адрес передается? а, наверное чтобы MAC подставить
+ вот только непонятно, адреса проставил, а дальше? или это все?
+ */
 int eth_header(struct sk_buff *skb, struct net_device *dev,
 	       unsigned short type,
 	       const void *daddr, const void *saddr, unsigned len)
@@ -319,6 +324,7 @@ const struct header_ops eth_header_ops ____cacheline_aligned = {
  * @dev: network device
  * Fill in the fields of the device structure with Ethernet-generic values.
  */
+// здесь и создается eth?
 void ether_setup(struct net_device *dev)
 {
 	dev->header_ops		= &eth_header_ops;

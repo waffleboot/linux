@@ -25,6 +25,8 @@
 
 #include <linux/netdevice.h>
 
+// используются в net_device.type
+
 /* ARP protocol HARDWARE identifiers. */
 #define ARPHRD_NETROM	0		/* from KA9Q: NET/ROM pseudo	*/
 #define ARPHRD_ETHER 	1		/* Ethernet 10Mbps		*/

@@ -250,6 +250,7 @@ static void loopback_setup(struct net_device *dev)
 }
 
 /* Setup and register the loopback device. */
+// а это собственно код создания lo устройства
 static __net_init int loopback_net_init(struct net *net)
 {
 	struct net_device *dev;
@@ -284,11 +285,17 @@ static __net_exit void loopback_net_exit(struct net *net)
 	unregister_netdev(dev);
 }
 
+/*
+ а вот и pernet_operations, описывающие init и exit
+ */
 static struct pernet_operations __net_initdata loopback_net_ops = {
        .init = loopback_net_init,
        .exit = loopback_net_exit,
 };
 
+/*
+ процедура инициализации, регистрирующая сетевое устройство
+ */
 static int __init loopback_init(void)
 {
 	return register_pernet_device(&loopback_net_ops);
@@ -297,4 +304,9 @@ static int __init loopback_init(void)
 /* Loopback is special. It should be initialized before any other network
  * device and network subsystem.
  */
+// тоже наверное прячется в какую-нибудь секцию
+// да, только почему-то тип возвращаемого значения указан как int, а не initcall_t
+// я был не прав, initcall_t это указатель на функцию инициализации, которая возвращает int
+// а, не, все правильно, создается указатель на функцию.
+// там все устроено так, что в эту секцию попадают указатели
 fs_initcall(loopback_init);
