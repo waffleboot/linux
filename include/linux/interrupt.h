@@ -195,8 +195,17 @@ static inline int disable_irq_wake(unsigned int irq)
 #endif /* CONFIG_GENERIC_HARDIRQS */
 
 #ifndef __ARCH_SET_SOFTIRQ_PENDING
-#define set_softirq_pending(x) (local_softirq_pending() = (x))
-#define or_softirq_pending(x)  (local_softirq_pending() |= (x))
+// наверное это макросы по установке битов, потом дергается программное прерывание, общее для всех
+// и оно уже смотрит, какие биты выставлены и для этих битов дергается обработчики
+// видимо для этого и проводилась регистрация битов и обработчиков!
+// net_rx_action наверное для этого и нужен!
+// local_softirq_pending()
+// __IRQ_STAT(smp_processor_id(), __softirq_pending)
+// (irq_stat[smp_processor_id()].member)
+// короче, есть device independent irq_stat[cpu].member и там есть флаги что обрабатывать
+// видимо дергается softirq и оно уже обрабатывает
+#define set_softirq_pending(x) (local_softirq_pending() = (x)) // а тут явно вся маска прошивается
+#define or_softirq_pending(x)  (local_softirq_pending() |= (x)) // выставляется бит
 #endif
 
 /*
@@ -246,10 +255,11 @@ static inline void __deprecated save_and_cli(unsigned long *x)
 
 enum
 {
+    // видимо номера прерывании, программные что ли?
 	HI_SOFTIRQ=0,
 	TIMER_SOFTIRQ,
 	NET_TX_SOFTIRQ,
-	NET_RX_SOFTIRQ,
+	NET_RX_SOFTIRQ, // постоянно не туда смотрю
 	BLOCK_SOFTIRQ,
 	TASKLET_SOFTIRQ,
 	SCHED_SOFTIRQ,
@@ -271,6 +281,9 @@ struct softirq_action
 asmlinkage void do_softirq(void);
 extern void open_softirq(int nr, void (*action)(struct softirq_action*), void *data);
 extern void softirq_init(void);
+// вот что делает эта функция?
+// сюда передается например NET_RX_SOFTIRQ
+// какой-то цикл по сдвигу единицы влево
 #define __raise_softirq_irqoff(nr) do { or_softirq_pending(1UL << (nr)); } while (0)
 extern void FASTCALL(raise_softirq_irqoff(unsigned int nr));
 extern void FASTCALL(raise_softirq(unsigned int nr));

@@ -352,6 +352,7 @@ static inline int napi_schedule_prep(struct napi_struct *n)
  * Schedule NAPI poll routine to be called if it is not already
  * running.
  */
+// и как это я ее не нашел?
 static inline void napi_schedule(struct napi_struct *n)
 {
 	if (napi_schedule_prep(n))
@@ -652,6 +653,16 @@ struct net_device
  * refcnt is a very hot point, so align it on SMP
  */
 	/* Number of references to this device */
+    // используется при приеме пакета и постановке его в очередь
+    // возможно где-то уменьшается
+    // а вот интересно, что будет если отключить устройство во время приема пакета?
+    // что за ____cacheline_aligned_in_smp?
+    // это ____cacheline_aligned в SMP
+    // фактически __attribute__((__aligned__(L1_CACHE_BYTES)))
+    // атрибут очень часто используется, поэтому размещается в отдельной секции
+    // вообще говоря странно, не разносит же компилятор все такие объекты по разным местам
+    // ведь все определяется количеством объектов и выделять общее место не получится
+    // думаю тут просто выравнивание, вот только зачем отдельная секция
 	atomic_t		refcnt ____cacheline_aligned_in_smp;
 
 	/* delayed register/unregister */
@@ -787,7 +798,7 @@ static inline void netif_napi_add(struct net_device *dev,
 
 struct packet_type {
 	__be16			type;	/* This is really htons(ether_type). */
-	struct net_device	*dev;	/* NULL is wildcarded here	     */
+	struct net_device	*dev;	/* NULL is wildcarded here	     */ // и это действительно так, используется при анализе пакета
 	int			(*func) (struct sk_buff *,
 					 struct net_device *,
 					 struct packet_type *,
@@ -891,11 +902,13 @@ static inline int unregister_gifconf(unsigned int family)
 /*
  * Incoming packets are placed on per-cpu queues so that
  * no locking is needed.
+   Написано, что у каждого проца есть своя очередь ожидания и пакеты разбрасываются по очередям
+   и в этом случае не нужна блокировка. Прикольно. Но конечно же меняется порядок в этом случае.
  */
 struct softnet_data
 {
 	struct net_device	*output_queue;
-	struct sk_buff_head	input_pkt_queue;
+	struct sk_buff_head	input_pkt_queue; // вот что для меня важно, это входящие пакеты
 	struct list_head	poll_list;
 	struct sk_buff		*completion_queue;
 
@@ -905,6 +918,7 @@ struct softnet_data
 #endif
 };
 
+// или может быть здесь, там был define, а тут declare
 DECLARE_PER_CPU(struct softnet_data,softnet_data);
 
 #define HAVE_NETIF_QUEUE

@@ -4,6 +4,8 @@
 #include <linux/kernel.h>
 #include <asm/cache.h>
 
+// 1 << L1_CACHE_SHIFT
+
 #ifndef L1_CACHE_ALIGN
 #define L1_CACHE_ALIGN(x) ALIGN(x, L1_CACHE_BYTES)
 #endif
@@ -15,6 +17,13 @@
 #ifndef __read_mostly
 #define __read_mostly
 #endif
+
+/*
+ бред какой-то описан
+ сначала определяется ____cacheline_aligned как __attribute__((__aligned__(1 << L1_CACHE_SHIFT)))
+ затем идет снова проверка, но при этом выставляется атрибут размещения в отдельной секции
+ короче все это уже описано, см. x86-cache
+ */
 
 #ifndef ____cacheline_aligned
 #define ____cacheline_aligned __attribute__((__aligned__(SMP_CACHE_BYTES)))

@@ -1,4 +1,8 @@
 /*
+ какой странный код
+ написано что startup код, вот только чего?
+ */
+/*
  *  linux/arch/i386/kernel/head.S -- the 32-bit startup code.
  *
  *  Copyright (C) 1991, 1992  Linus Torvalds

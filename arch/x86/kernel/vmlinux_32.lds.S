@@ -89,6 +89,7 @@ SECTIONS
   }
 
   . = ALIGN(4096);
+  // еще одна интересная секция
   .data.page_aligned : AT(ADDR(.data.page_aligned) - LOAD_OFFSET) {
 	*(.data.page_aligned)
 	*(.data.idt)
@@ -100,6 +101,7 @@ SECTIONS
   }
 
   /* rarely changed data like cpu maps */
+  // тоже интересная секция
   . = ALIGN(32);
   .data.read_mostly : AT(ADDR(.data.read_mostly) - LOAD_OFFSET) {
 	*(.data.read_mostly)

@@ -249,6 +249,8 @@ static RAW_NOTIFIER_HEAD(netdev_chain);
  *	queue in the local softnet handler.
  */
 
+// определен softnet_data массив для каждого CPU
+// интересная вещь, чтобы не было блокировок у каждого проца своя очередь
 DEFINE_PER_CPU(struct softnet_data, softnet_data);
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
@@ -354,6 +356,8 @@ static inline void netdev_set_lockdep_class(spinlock_t *lock,
  *	will see the new packet type (until the next received packet).
  */
 
+// тоже интересная функция, добавляет в разные кэши
+// ETH_P_ALL описан в include/linux/if_ether.h
 void dev_add_pack(struct packet_type *pt)
 {
 	int hash;
@@ -1738,6 +1742,7 @@ out:
 int netdev_max_backlog __read_mostly = 1000;
 int netdev_budget __read_mostly = 300;
 int weight_p __read_mostly = 64;            /* old backlog weight */
+// ух ты, глобальная переменная, видимо начальное значение?
 
 DEFINE_PER_CPU(struct netif_rx_stats, netdev_rx_stat) = { 0, };
 
@@ -1760,6 +1765,9 @@ DEFINE_PER_CPU(struct netif_rx_stats, netdev_rx_stat) = { 0, };
 /*
  функция вызывается из драйвера после приема всего пакета и размещения его в сокетном буфере
  не понимаю что тут происходит
+ о как, описано что задача в том, чтобы закинуть сокетный буфер в wait queue on CPU specific, только не понял
+ что это значит
+ и выйти из прерывания
  */
 int netif_rx(struct sk_buff *skb)
 {
@@ -1778,22 +1786,38 @@ int netif_rx(struct sk_buff *skb)
 	 * short when CPU is congested, but is still operating.
 	 */
 	local_irq_save(flags);
-	queue = &__get_cpu_var(softnet_data);
+	queue = &__get_cpu_var(softnet_data); // а вот кстати и softnet_data, это wait queue какая-то
 
 	__get_cpu_var(netdev_rx_stat).total++;
-	if (queue->input_pkt_queue.qlen <= netdev_max_backlog) {
+    // хитрым образом организованный цикл
+    // а, видимо пришедший пакет ставится в очередь того проца, что сейчас обрабатывает пакет
+    // получается только один процессор обрабатывает прерывание
+    // и следующий пакет будет обработан другим процессором
+    // а интересно, а можно обработку пакетов повесить на один проц?
+	if (queue->input_pkt_queue.qlen <= netdev_max_backlog) { // тут мы проверяем что еще можно добавлять в очередь задач, иначе пакет отбрасывается, несмотря на то, что в других процах есть еще место
 		if (queue->input_pkt_queue.qlen) {
+            // если в очереди есть кто-то, то просто добавляем пакет в очередь и сдвигаем очередь дальше, переводим указатель на хвост
+            // если же в очереди никого нет, то запускается планировщик!
+            // очень интересно написан цикл
 enqueue:
-			dev_hold(skb->dev);
-			__skb_queue_tail(&queue->input_pkt_queue, skb);
+			dev_hold(skb->dev); // что за нафиг? atomic_inc(&dev->refcnt); видимо захват устройства, что оно используется
+			__skb_queue_tail(&queue->input_pkt_queue, skb); // мы добавляем себя именно здесь
 			local_irq_restore(flags);
-			return NET_RX_SUCCESS;
+			return NET_RX_SUCCESS; // положительная точка выхода, до этого разрешены прерывания
 		}
 
-		napi_schedule(&queue->backlog);
+        // а вот napi_schedule фунции я не нашел, есть только __napi_schedule
+        // в netdevice.h определена, что странно
+        // но дергается все равно __napi_schedule
+		napi_schedule(&queue->backlog); // задача ставится на выполнение? да, т.к. до этого очередь была пуста, мы добавили себя, точнее добавим. и да, мы ставим на выполнение, а потом добавляем потому что это CPU specific очередь, т.е.
+        // не начнет ее выполнять, потому что другим занят
 		goto enqueue;
 	}
 
+    // а это отрицательный выход
+    // считается что пакет нельзя обработать, например нет места в очереди задач
+    // но прерывания все равно восстанавливаются
+    // также освобождается память -> интересная вещь, память выделил один код, а возвращает другой
 	__get_cpu_var(netdev_rx_stat).dropped++;
 	local_irq_restore(flags);
 
@@ -1882,6 +1906,7 @@ static inline int deliver_skb(struct sk_buff *skb,
 			      struct packet_type *pt_prev,
 			      struct net_device *orig_dev)
 {
+    // для каждого протокола дергается func!
 	atomic_inc(&skb->users);
 	return pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
 }
@@ -2019,6 +2044,9 @@ out:
  *	NET_RX_SUCCESS: no congestion
  *	NET_RX_DROP: packet was dropped
  */
+/*
+ вот добрались и до обработки пакета
+ */
 int netif_receive_skb(struct sk_buff *skb)
 {
 	struct packet_type *ptype, *pt_prev;
@@ -2043,6 +2071,7 @@ int netif_receive_skb(struct sk_buff *skb)
 
 	__get_cpu_var(netdev_rx_stat).total++;
 
+    // ух ты, что-то делаем с заголовком пакета
 	skb_reset_network_header(skb);
 	skb_reset_transport_header(skb);
 	skb->mac_len = skb->network_header - skb->mac_header;
@@ -2058,9 +2087,22 @@ int netif_receive_skb(struct sk_buff *skb)
 	}
 #endif
 
+    // видимо проверяется каждый тип пакета и направляется на обработку
+    // причем сравнение идет через равенство dev
+    // видимо все это чтобы найти протокол тип pt_prev
+    // делается вот что, есть ptype и когда он регистрируется, то указывается на каком устройстве
+    // поэтому не надо анализировать заголовки! есть устройство с которого пришло и есть описание
+    // что это устройство изначально выдает например eth, а может и token ring
+    // важно что мы просто сравниваем устройство пакета с регистрацией и дергаем нужный обработчик
+    // а может быть и ip вешается на то же устройство?
+    // и для этого и используется pt_prev
 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
 		if (!ptype->dev || ptype->dev == skb->dev) {
 			if (pt_prev)
+                // а вот этого я не понял, что делает deliver_skb
+                // очень важная функция
+                // видимо эти протоколы регистрируются
+                // нужна видимо для того чтобы протоколы верхнего уровня дергали нижний уровень?
 				ret = deliver_skb(skb, pt_prev, orig_dev);
 			pt_prev = ptype;
 		}
@@ -2073,14 +2115,19 @@ int netif_receive_skb(struct sk_buff *skb)
 ncls:
 #endif
 
+    // может быть это проброс пакета
 	skb = handle_bridge(skb, &pt_prev, &ret, orig_dev);
 	if (!skb)
 		goto out;
+    // а это что такое?
 	skb = handle_macvlan(skb, &pt_prev, &ret, orig_dev);
 	if (!skb)
 		goto out;
 
 	type = skb->protocol;
+    // видимо протоколы нижнего уровня в своих полях прописывают что за протокол
+    // и дальше идет анализ. только протокол нижнего уровня знает что за данных он гонит
+    // логика подсказывает что обрабатывается последний и до него
 	list_for_each_entry_rcu(ptype, &ptype_base[ntohs(type)&15], list) {
 		if (ptype->type == type &&
 		    (!ptype->dev || ptype->dev == skb->dev)) {
@@ -2105,19 +2152,21 @@ out:
 	return ret;
 }
 
+// а вот и функция обработки очереди
+// и как я пропустил, что в книге именно process_backlog и описан?
 static int process_backlog(struct napi_struct *napi, int quota)
 {
 	int work = 0;
 	struct softnet_data *queue = &__get_cpu_var(softnet_data);
 	unsigned long start_time = jiffies;
 
-	napi->weight = weight_p;
+	napi->weight = weight_p; // не понимаю, откуда берется weight_p, а это глобальная переменная, видимо константа
 	do {
 		struct sk_buff *skb;
 		struct net_device *dev;
 
 		local_irq_disable();
-		skb = __skb_dequeue(&queue->input_pkt_queue);
+		skb = __skb_dequeue(&queue->input_pkt_queue); // а вот и вытаскивается сокетный буфер или пакет
 		if (!skb) {
 			__napi_complete(napi);
 			local_irq_enable();
@@ -2128,9 +2177,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
 
 		dev = skb->dev;
 
-		netif_receive_skb(skb);
+		netif_receive_skb(skb); // обработка пакета
 
-		dev_put(dev);
+		dev_put(dev); // а вот и возврат. dev_hold был до этого где-то там
 	} while (++work < quota && jiffies == start_time);
 
 	return work;
@@ -2148,12 +2197,21 @@ void fastcall __napi_schedule(struct napi_struct *n)
 
 	local_irq_save(flags);
 	list_add_tail(&n->poll_list, &__get_cpu_var(softnet_data).poll_list);
+    // ух ты какая вещь. дергается NET_RX_SOFTIRQ или не дергается?
+    // сама по себе функция дергается когда приходит пакет и становится в wait queue
+    // нет, не дергается, а просто выставляется флаг
+    // макрос разворачивается в |= 1 на нужном месте
+    // а, ну да. просто выставляется флаг что нужно обработать пакет, дернуть задачу по обработке пакета
+    // но это будет не сразу видимо, а когда случится прерывание, вот только кто его дергает?
+    // ведь тут только флаг выставляется
 	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
 	local_irq_restore(flags);
 }
 EXPORT_SYMBOL(__napi_schedule);
 
-
+// не понимаю зачем эта функция, но она где-то регистрируется
+// да, так и есть. это функция которая дергается при анализе irqstat
+// видимо пришел пакет и его нужно обработать
 static void net_rx_action(struct softirq_action *h)
 {
 	struct list_head *list = &__get_cpu_var(softnet_data).poll_list;
@@ -2198,7 +2256,7 @@ static void net_rx_action(struct softirq_action *h)
 		 */
 		work = 0;
 		if (test_bit(NAPI_STATE_SCHED, &n->state))
-			work = n->poll(n, weight);
+			work = n->poll(n, weight); // бинго! именно здесь и дергается poll-функция
 
 		WARN_ON_ONCE(work > weight);
 
@@ -4446,6 +4504,14 @@ static int __init net_dev_init(void)
 		queue->completion_queue = NULL;
 		INIT_LIST_HEAD(&queue->poll_list);
 
+        /*
+         какая интересная вещь
+         берется очередь для каждого проца softnet_data, это та очередь куда пишутся запросы на обработку пакетов
+         далее выше инициализируется input_pkt_queue, видимо куда пишутся пакеты
+         и далее выставляется poll, который! есть функция
+         т.е. где-то есть макрос, который дергает poll-функцию для каждого элемента
+         в конечном счете все это дергается из net_rx_action
+         */
 		queue->backlog.poll = process_backlog;
 		queue->backlog.weight = weight_p;
 	}
@@ -4454,6 +4520,10 @@ static int __init net_dev_init(void)
 
 	dev_boot_phase = 0;
 
+    // тоже описан NET_RX_SOFTIRQ и даже написана ссылка на net_rx_action
+    // а вот здесь написано, что когда выставлен флаг NET_RX_SOFTIRQ, который появится после прихода пакета
+    // и который будет взят из очереди
+    // только я забыл, как работает планировщик
 	open_softirq(NET_TX_SOFTIRQ, net_tx_action, NULL);
 	open_softirq(NET_RX_SOFTIRQ, net_rx_action, NULL);
 

@@ -1346,7 +1346,7 @@ static int ipv4_proc_init(void);
  */
 
 static struct packet_type ip_packet_type = {
-	.type = __constant_htons(ETH_P_IP),
+	.type = __constant_htons(ETH_P_IP), // это IP, получается там вложенные обработчики
 	.func = ip_rcv,
 	.gso_send_check = inet_gso_send_check,
 	.gso_segment = inet_gso_segment,
@@ -1444,6 +1444,7 @@ static int __init inet_init(void)
 
 	ipfrag_init();
 
+    // добавляем обработчик
 	dev_add_pack(&ip_packet_type);
 
 	rc = 0;

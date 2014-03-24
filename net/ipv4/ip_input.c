@@ -375,6 +375,8 @@ drop:
 /*
  * 	Main IP Receive routine.
  */
+// ДА! Это главная функция обработки IP пакетов
+// видимо там вложенная обработка
 int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct iphdr *iph;
@@ -442,6 +444,7 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	/* Remove any debris in the socket control block */
 	memset(IPCB(skb), 0, sizeof(struct inet_skb_parm));
 
+    // NF_HOOK это крюк
 	return NF_HOOK(PF_INET, NF_IP_PRE_ROUTING, skb, dev, NULL,
 		       ip_rcv_finish);
 

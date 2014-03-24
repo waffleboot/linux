@@ -699,6 +699,7 @@ void arp_send(int type, int ptype, __be32 dest_ip,
  *	Process an arp request.
  */
 
+// а вернул он обработчик! т.е. можно вернуть обработчик
 static int arp_process(struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;
@@ -808,6 +809,7 @@ static int arp_process(struct sk_buff *skb)
 		if (arp->ar_op == htons(ARPOP_REQUEST) &&
 		    inet_addr_type(tip) == RTN_LOCAL &&
 		    !arp_ignore(in_dev,dev,sip,tip))
+            // отправляем пакет? круто.
 			arp_send(ARPOP_REPLY, ETH_P_ARP, sip, dev, tip, sha,
 				 dev->dev_addr, sha);
 		goto out;
@@ -815,6 +817,8 @@ static int arp_process(struct sk_buff *skb)
 
 	if (arp->ar_op == htons(ARPOP_REQUEST) &&
 	    ip_route_input(skb, tip, sip, 0, dev) == 0) {
+        
+        // а здесь видимо обновляется таблица маршрутизации?
 
 		rt = (struct rtable*)skb->dst;
 		addr_type = rt->rt_type;
@@ -857,6 +861,8 @@ static int arp_process(struct sk_buff *skb)
 	}
 
 	/* Update our ARP tables */
+    
+    // круто, именно здесь проставляется соответствие между IP и ARP
 
 	n = __neigh_lookup(&arp_tbl, &sip, dev, 0);
 
@@ -909,6 +915,9 @@ static void parp_redo(struct sk_buff *skb)
  *	Receive an arp request from the device layer.
  */
 
+/*
+ обработчик ARP пакета
+ */
 static int arp_rcv(struct sk_buff *skb, struct net_device *dev,
 		   struct packet_type *pt, struct net_device *orig_dev)
 {
@@ -936,6 +945,7 @@ static int arp_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	memset(NEIGH_CB(skb), 0, sizeof(struct neighbour_cb));
 
+    // странно, что это он вернул
 	return NF_HOOK(NF_ARP, NF_ARP_IN, skb, dev, NULL, arp_process);
 
 freeskb:
@@ -1221,7 +1231,7 @@ void arp_ifdown(struct net_device *dev)
  */
 
 static struct packet_type arp_packet_type = {
-	.type =	__constant_htons(ETH_P_ARP),
+	.type =	__constant_htons(ETH_P_ARP), // а вот и тип пакета, видимо для eth
 	.func =	arp_rcv,
 };
 
@@ -1231,6 +1241,8 @@ void __init arp_init(void)
 {
 	neigh_table_init(&arp_tbl);
 
+    // добавляем обработчик пакета
+    // у него должен быть func
 	dev_add_pack(&arp_packet_type);
 	arp_proc_init();
 #ifdef CONFIG_SYSCTL
