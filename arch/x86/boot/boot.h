@@ -34,6 +34,8 @@ extern struct setup_header hdr;
 extern struct boot_params boot_params;
 
 /* Basic port I/O */
+// используется в драйверах
+// volatile нужен чтобы компилятор не перемещал инструкции
 static inline void outb(u8 v, u16 port)
 {
 	asm volatile("outb %0,%1" : : "a" (v), "dN" (port));

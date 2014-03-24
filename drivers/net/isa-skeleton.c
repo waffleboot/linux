@@ -367,15 +367,23 @@ static void net_tx_timeout(struct net_device *dev)
  * registers that "should" only need to be set once at boot, so that
  * there is non-reboot way to recover if something goes wrong.
  */
+/*
+ эта функция ко всему прочему вешает обработчик прерывания
+ и насколько я понимаю в конфиге запуска можно указать на какое прерывание должна реагировать карта
+ видимо, чтобы это поменять нужно рестартовать ядро
+ net_interrupt это видимо и есть обработчик прерывания или зарегистрированный, возможно ядро вешает
+ поверх обработчика свою обертку
+ */
 static int
 net_open(struct net_device *dev)
 {
 	struct net_local *np = netdev_priv(dev);
-	int ioaddr = dev->base_addr;
+	int ioaddr = dev->base_addr; // видимо это прописывается в настройках
 	/*
 	 * This is used if the interrupt line can turned off (shared).
 	 * See 3c503.c for an example of selecting the IRQ at config-time.
 	 */
+    // вешает обработчик прерывания и передает devid видимо
 	if (request_irq(dev->irq, &net_interrupt, 0, cardname, dev)) {
 		return -EAGAIN;
 	}
@@ -390,7 +398,7 @@ net_open(struct net_device *dev)
 
 	/* Reset the hardware here. Don't forget to set the station address. */
 	chipset_init(dev, 1);
-	outb(0x00, ioaddr);
+	outb(0x00, ioaddr); // а вот это я не понял. а, это по ioaddr пишется ноль зачем-то. это пример.
 	np->open_time = jiffies;
 
 	/* We are now ready to accept transmit requeusts from
@@ -508,6 +516,7 @@ void net_tx(struct net_device *dev)
  * The typical workload of the driver:
  * Handle the network interface interrupts.
  */
+// а вот и обработчик прерывания, занятно что dev_id это dev
 static irqreturn_t net_interrupt(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
@@ -515,16 +524,21 @@ static irqreturn_t net_interrupt(int irq, void *dev_id)
 	int ioaddr, status;
 	int handled = 0;
 
+    // видимо это базовый адрес с которого начинаются порты устройства, видимо это тоже где-то прописывается
 	ioaddr = dev->base_addr;
 
 	np = netdev_priv(dev);
+    // это пример,
 	status = inw(ioaddr + 0);
 
 	if (status == 0)
 		goto out;
 	handled = 1;
 
+    // константа нигде не описана, просто предполагается что устройство вернет статус и либо пришел пакет, либо завершена отправка
+    // и можно пихать следующий пакет из кольца
 	if (status & RX_INTR) {
+        // да, получен пакет, дернуть net_rx
 		/* Got a packet(s). */
 		net_rx(dev);
 	}
@@ -534,9 +548,13 @@ static irqreturn_t net_interrupt(int irq, void *dev_id)
 		net_tx(dev);
 		np->stats.tx_packets++;
 		netif_wake_queue(dev);
+        // не понимаю, но вижу что растет статистика
 	}
 #endif
 	if (status & COUNTERS_INTR) {
+        // видимо предполагается что устройство выдает набор флагов, т.е. может работать одновременно на отправку и прием
+        // и на подсчет ошибок?
+        // видимо сигнализирует об ошибке отправки
 		/* Increment the appropriate 'localstats' field. */
 		np->stats.tx_window_errors++;
 	}
