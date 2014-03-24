@@ -563,14 +563,18 @@ out:
 }
 
 /* We have a good packet(s), get it/them out of the buffers. */
+// предполагается что есть пакет и его надо забрать с карты
 static void
 net_rx(struct net_device *dev)
 {
 	struct net_local *lp = netdev_priv(dev);
 	int ioaddr = dev->base_addr;
-	int boguscount = 10;
+	int boguscount = 10; // сколько пакетов за раз можно забрать
 
 	do {
+        // читаем статус и длину пакета, наверное eth пакета
+        // читается штучно, может быть даже несколько пакетов за раз
+        // поэтому и цикл
 		int status = inw(ioaddr);
 		int pkt_len = inw(ioaddr);
 
@@ -578,6 +582,8 @@ net_rx(struct net_device *dev)
 			break;			/* Done for now */
 
 		if (status & 0x40) {	/* There was an error. */
+            // увеличиваем статистику
+            // а вот интересно, как мы так забрали на себя структуру net_local
 			lp->stats.rx_errors++;
 			if (status & 0x20) lp->stats.rx_frame_errors++;
 			if (status & 0x10) lp->stats.rx_over_errors++;
@@ -589,25 +595,50 @@ net_rx(struct net_device *dev)
 
 			lp->stats.rx_bytes+=pkt_len;
 
+            /*
+             а вот это самое интересное, драйвер создает сокетный буфер!
+             dev_alloc_skb - надо будет посмотреть чем это отличается от просто alloc_skb
+             почти ничем, вызывает ее же, ну может с дополнительной оберткой, нужно добавить 16 байт сверху пакета
+             данные пишутся в один и тот же буфер, просто tail смещается
+             или нет
+             вообще говоря странно, dev_alloc_skb вроде как выделяет новое место, новый сетевой буфер
+             такое ощущение что на весь сетевой буфер отводится только часть пакета
+             а может быть мы пакет читаем за раз? судя по статистики, наверное да.
+             */
+            
 			skb = dev_alloc_skb(pkt_len);
 			if (skb == NULL) {
+                // вообще говоря странно, разве этот пакет не остается в памяти?
+                // и не будет подхвачен потом снова?
 				printk(KERN_NOTICE "%s: Memory squeeze, dropping packet.\n",
 					   dev->name);
 				lp->stats.rx_dropped++;
 				break;
 			}
-			skb->dev = dev;
+			skb->dev = dev; // указываем с какой карты пришел пакет. наверное потом оттуда возьмем доп. настройки
 
 			/* 'skb->data' points to the start of sk_buff data area. */
+            // а вот копирование
+            // берется сокетный буфер, его tail продвигается и в конец tail пишутся данные
+            // rmem_start это видимо отмаппированная часть, принадлежащая устройству
+            // т.е. memcpy фактически с помощью процессора копирует память устройства в основную память
+            // просто rmem выглядит как память, а реально это память устройства, оно отвечает на запросы по этому адресу
 			memcpy(skb_put(skb,pkt_len), (void*)dev->rmem_start,
 				   pkt_len);
 			/* or */
+            // не знаю зачем тут смещение, а. ну да.
+            // мы же получаем в len количество байтов
+            // а используем rep insw, т.е. читаем словами, по два байта
+            // поэтому нужно прочитать именно len/2 слов
+            // читать будем с порта в нужное место, а дальше rep insw сделает всю работу
+            // я так понимаю что просто стоит счетчик и показывает сколько раз считать с порта
 			insw(ioaddr, skb->data, (pkt_len + 1) >> 1);
 
 			netif_rx(skb);
 			dev->last_rx = jiffies;
 			lp->stats.rx_packets++;
 			lp->stats.rx_bytes += pkt_len;
+            // в общем получается что за раз читаем весь пакет
 		}
 	} while (--boguscount);
 

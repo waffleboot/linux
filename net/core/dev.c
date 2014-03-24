@@ -1757,6 +1757,10 @@ DEFINE_PER_CPU(struct netif_rx_stats, netdev_rx_stat) = { 0, };
  *
  */
 
+/*
+ функция вызывается из драйвера после приема всего пакета и размещения его в сокетном буфере
+ не понимаю что тут происходит
+ */
 int netif_rx(struct sk_buff *skb)
 {
 	struct softnet_data *queue;
@@ -4128,6 +4132,7 @@ out:
 	return err;
 }
 
+// какая-то странная функция, непонятно что делает
 static int dev_cpu_callback(struct notifier_block *nfb,
 			    unsigned long action,
 			    void *ocpu)

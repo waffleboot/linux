@@ -336,10 +336,14 @@ static inline void outs##bwl(int port, const void *addr, unsigned long count) { 
 } \
 static inline void ins##bwl(int port, void *addr, unsigned long count) { \
 	__asm__ __volatile__("rep; ins" #bwl : "+D"(addr), "+c"(count) : "d"(port)); \
+    // а вот и insw
 }
 
 BUILDIO(b,b,char)
 BUILDIO(w,w,short)
+// разворачивается в
+// static inline void insw(int port, void *addr, unsigned long count) {
+// __asm__ __volatile__("rep; insw" : "+D"(addr), "+c"(count) : "d"(port));
 BUILDIO(l,,int)
 
 #endif

@@ -407,6 +407,7 @@ extern void	       __kfree_skb(struct sk_buff *skb);
 extern struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int fclone, int node);
 // и две функции, собственно alloc_skb и клонирующая сокетный буфер
 // что интересно, обе в качестве NUMA node передают -1
+// ну конечно, alloc_skb описана здесь и это просто обертка над другой функцией
 static inline struct sk_buff *alloc_skb(unsigned int size, gfp_t priority)
 {
 	return __alloc_skb(size, priority, 0, -1);
@@ -967,13 +968,22 @@ static inline unsigned char *__skb_put(struct sk_buff *skb, unsigned int len)
  *	exceed the total buffer size the kernel will panic. A pointer to the
  *	first byte of the extra data is returned.
  */
+/*
+ добавляем данные в сокетный буфер
+ эта функция расширяет область данных в буфере. если же места не хватит, то будет паника
+ возвращает место куда можно писать
+ */
 static inline unsigned char *skb_put(struct sk_buff *skb, unsigned int len)
 {
+    // получаем tail
+    // на самом деле функция не добавляет данные, а выделяет место
+    // tmp это начало, куда можно писать
 	unsigned char *tmp = skb_tail_pointer(skb);
 	SKB_LINEAR_ASSERT(skb);
 	skb->tail += len;
 	skb->len  += len;
 	if (unlikely(skb->tail > skb->end))
+        // а вот тут паникуем если tail выходит за границу буфера
 		skb_over_panic(skb, len, current_text_addr());
 	return tmp;
 }
@@ -1363,6 +1373,7 @@ static inline void __skb_queue_purge(struct sk_buff_head *list)
 static inline struct sk_buff *__dev_alloc_skb(unsigned int length,
 					      gfp_t gfp_mask)
 {
+    // NET_SKB_PAD это дополнительное место выше пакета, т.н. headroom
 	struct sk_buff *skb = alloc_skb(length + NET_SKB_PAD, gfp_mask);
 	if (likely(skb))
 		skb_reserve(skb, NET_SKB_PAD);
@@ -1381,6 +1392,10 @@ static inline struct sk_buff *__dev_alloc_skb(unsigned int length,
  *	%NULL is returned if there is no free memory. Although this function
  *	allocates memory it can be called from an interrupt.
  */
+// да, может сработать из прерывания
+// но это еще вопрос, как обрабатываются прерывания
+// может быть просто прерывания ставятся в очередь
+// но в любом случае именна эта функция дергается из сетевого драйвера и параметр это длина пакета
 static inline struct sk_buff *dev_alloc_skb(unsigned int length)
 {
 	return __dev_alloc_skb(length, GFP_ATOMIC);
