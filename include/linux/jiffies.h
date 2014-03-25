@@ -74,6 +74,9 @@
  */
 extern u64 __jiffy_data jiffies_64;
 extern unsigned long volatile __jiffy_data jiffies;
+/*
+ какая-то сильно значимая переменная
+ */
 
 #if (BITS_PER_LONG < 64)
 u64 get_jiffies_64(void);

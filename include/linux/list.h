@@ -18,15 +18,42 @@
  * using the generic single-entry routines.
  */
 
+/*
+ берем элемент, который собираемся сохранять в списке
+ добавляем в него list_head
+ это структура из двух полей: ссылка на предыдущий такой же и на следующий такой же
+ указатели
+ */
 struct list_head {
 	struct list_head *next, *prev;
 };
 
+/*
+ да, list_head это два указателя
+ поэтому если вызвать LIST_HEAD_INIT(zoo)
+ это развернется в
+ {&(zoo),&(zoo)}
+ но если передать LIST_HEAD_INIT(first.mylist)
+ {&(first.mylist), &(first.mylist) }
+ т.е. структура получит два указателя на одно и тоже
+ это макрос, который сразу заполняет указатели
+ */
 #define LIST_HEAD_INIT(name) { &(name), &(name) }
 
+/*
+ описалово, создает структуру в виде переменной
+ struct list_head name = { &name, &name };
+ */
 #define LIST_HEAD(name) \
 	struct list_head name = LIST_HEAD_INIT(name)
 
+/*
+ а это функция
+ только выше передается имя и по нему инициализируется указатель
+ дело в том, что LIST_HEAD_INIT можно вызывать когда имя определено, четко указано и можно получить адрес
+ INIT_LIST_HEAD так не пройдет, потому что адрес переменной это адрес переменной, а не то, что за ней стоит
+ это тоже инициализация, только передается уже определенный объект и инициализируется
+ */
 static inline void INIT_LIST_HEAD(struct list_head *list)
 {
 	list->next = list;
@@ -38,6 +65,19 @@ static inline void INIT_LIST_HEAD(struct list_head *list)
  *
  * This is only for internal list manipulation where we know
  * the prev/next entries already!
+ */
+/*
+ все что делает эта фунция это вставляет элемент между двумя другими
+ и это очень интересно
+ эта функция вставляет элемент между двумя другими
+ и prev/next скоррелированы, т.е. взаимосвязаны и prev.next = next и next.prev = prev
+ иначе потеряем элемент, сам он будет в памяти, а вот в списке его не будет
+ интересно и что в этом случае делать? является ли это утечкой памяти?
+ ну, в общем смысле да, потому что память это не то, что на железе, а то что описано
+ вот есть список свободной памяти, вот столько значит ее и есть и даже если элемент будет потерян
+ это означает утечку памяти
+ эта функция только для использования внутри
+ при этом используя CONFIG_DEBUG_LIST можно дебажить и написать свою функцию
  */
 #ifndef CONFIG_DEBUG_LIST
 static inline void __list_add(struct list_head *new,
@@ -63,13 +103,22 @@ extern void __list_add(struct list_head *new,
  * Insert a new entry after the specified head.
  * This is good for implementing stacks.
  */
+/*
+ очень замечательная функция, добавляет элемент после head
+ т.е. реализует стек, новый элемент вставляется сразу после head
+ так можно организовать стек
+ head это не очень хороше название, я бы лучше назвал last, потому что после него вставляется
+ функция удобна тем что можно взять заголовок и добавить перед ним, фактически в самый конец
+ ведь head.prev это указатель на хвост списка
+ и передав хвост списка мы тем самым добавим элемент в самый конец
+ */
 #ifndef CONFIG_DEBUG_LIST
-static inline void list_add(struct list_head *new, struct list_head *head)
+static inline void list_add(struct list_head *new, struct list_head *last)
 {
-	__list_add(new, head, head->next);
+	__list_add(new, last, last->next);
 }
 #else
-extern void list_add(struct list_head *new, struct list_head *head);
+extern void list_add(struct list_head *new, struct list_head *last);
 #endif
 
 
