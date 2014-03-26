@@ -490,6 +490,12 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * @pos:	the &struct list_head to use as a loop cursor.
  * @head:	the head for your list.
  */
+/*
+ основная функция по обходу списка
+ передется имя переменной типа указатель куда будет сбрасываться указатель на определенный элемент итерации
+ и передается список, точнее указатель на него. везде и всегда передается только указатель на список, а не он сам
+ т.е. для переменных нужно использовать &
+ */
 #define list_for_each(pos, head) \
 	for (pos = (head)->next; prefetch(pos->next), pos != (head); \
         	pos = pos->next)

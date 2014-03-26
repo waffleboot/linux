@@ -37,6 +37,9 @@ int main() {
         LIST_HEAD(mylist);
         LIST_HEAD(p1);
         LIST_HEAD(p2);
+        // передается именно указатель на список, хотя я бы назвал его скорее указатель на последний элемент
+        // после которого нужно вставлять запись
+        // кстати, а можно вставлять запись во время итерации? т.е. выбрать элемент и тут же после него вставить запись?
         list_add(&p1, &mylist);
         struct list_head *tail = mylist.prev;
         list_add(&p2, tail);
@@ -46,14 +49,42 @@ int main() {
         // head.prev == last
         // last.next == head
         
-        printf("head = %lx\n", (unsigned long)&mylist);
-        printf("  p1 = %lx\n", (unsigned long)&p1);
-        printf("  p2 = %lx\n", (unsigned long)&p2);
+        printf("head = %p\n", &mylist);
+        printf("  p1 = %p\n", &p1);
+        printf("  p2 = %p\n", &p2);
         
-        printf("%lx\n", (unsigned long)&mylist);
-        printf("%lx\n", (unsigned long)mylist.next);
-        printf("%lx\n", (unsigned long)mylist.next->next);
-        printf("%lx\n", (unsigned long)mylist.next->next->next);
+        printf("%p\n", &mylist);
+        printf("%p\n", mylist.next);
+        printf("%p\n", mylist.next->next);
+        printf("%p\n", mylist.next->next->next);
         // таким образом формируется список
+        
+        printf("list for each\n");
+        
+        struct list_head *el;
+        __list_for_each(el,&mylist) {
+            printf("%p\n", el);
+        }
+    }
+    
+    {
+        printf("\nstack\n");
+
+        LIST_HEAD(list);
+        LIST_HEAD(p1);
+        LIST_HEAD(p2);
+        printf("  p1 = %p\n", &p1);
+        printf("  p2 = %p\n", &p2);
+        list_add(&p1, &list);
+        list_add(&p2, &list);
+        struct list_head *el;
+        __list_for_each(el,&list) {
+            printf("%p\n", el);
+        }
+    }
+    
+    {
+        LIST_HEAD(mlist);
+        struct mystruct z = list_entry(&mlist,struct mystruct,mylist);
     }
 }
