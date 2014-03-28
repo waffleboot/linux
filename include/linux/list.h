@@ -37,12 +37,17 @@ struct list_head {
  {&(first.mylist), &(first.mylist) }
  т.е. структура получит два указателя на одно и тоже
  это макрос, который сразу заполняет указатели
+ видимо используется при первоначальном создании
+ внутри кода использовать не получилось, только при определении самого элемента
  */
 #define LIST_HEAD_INIT(name) { &(name), &(name) }
 
 /*
  описалово, создает структуру в виде переменной
  struct list_head name = { &name, &name };
+ прикольная вещь, заголовок списка содержит только указатели
+ и вовсе нет нужны создавать весь элемент, куда входит этот список
+ воистину, list head, только голова списка
  */
 #define LIST_HEAD(name) \
 	struct list_head name = LIST_HEAD_INIT(name)
@@ -53,6 +58,9 @@ struct list_head {
  дело в том, что LIST_HEAD_INIT можно вызывать когда имя определено, четко указано и можно получить адрес
  INIT_LIST_HEAD так не пройдет, потому что адрес переменной это адрес переменной, а не то, что за ней стоит
  это тоже инициализация, только передается уже определенный объект и инициализируется
+ видимо используется когда нужно инициализировать список динамически, когда он создается динамически
+ например tss.files, т.е. внутри каждого процесса нужно завести список файлов, придется дергать эту процеруру
+ а вообще надо посмотреть по коду как это используется и действительно ли только в коде
  */
 static inline void INIT_LIST_HEAD(struct list_head *list)
 {
@@ -84,12 +92,22 @@ static inline void __list_add(struct list_head *new,
 			      struct list_head *prev,
 			      struct list_head *next)
 {
+	// интересно, а порядок важен?
+	// и кстати, как тут с SMP?
+	// важная штука оказывается, именно с настройки prev и должно все начинаться
+	// дело в том, что есть list_empty_careful функцию и она в конце проверяет что у head.prev не поменялось значения
+	// если список пустой изначально и мы добавляем в него элемент, то сначала меняем prev у head фактически
+	// head.next же меняется последним тут, а проверяется первым
+	// может быть это признак того, что другой проц поменял список
+	// безопасно вызывать list_empty_careful на не пустом, но там надо смотреть что с удалением
+	// может быть такая же процедура
 	next->prev = new;
 	new->next = next;
 	new->prev = prev;
 	prev->next = new;
 }
 #else
+// прикольно, можно оказывается дебажить добавление в списки
 extern void __list_add(struct list_head *new,
 			      struct list_head *prev,
 			      struct list_head *next);
@@ -111,6 +129,16 @@ extern void __list_add(struct list_head *new,
  функция удобна тем что можно взять заголовок и добавить перед ним, фактически в самый конец
  ведь head.prev это указатель на хвост списка
  и передав хвост списка мы тем самым добавим элемент в самый конец
+ название не стоило менять, это действительно голова списка, а не просто последний элемент после которого вставляем
+ у нас нет последнего элемента, у нас есть только голова списка и вообще говоря head это не совсем даже голова
+ потому что из него можно пойти в разные стороны и еще он не хранит дополнительную информацию как остальные узлы,
+ head как бы над всем и все что доступно в конечном счете это head
+ поэтому назвать его last было неправильно, мы не знаем last, просто так совпало
+ заметим что функция называется list_add, а не list_add_head или tail
+ дело в том, что head->next всегда указывает на самый последний добавленный элемент
+ а head->prev указывает на самый старый добавленный элемент
+ поэтому идя по next мы реализуем стек
+ а идя по prev реализуем очередь, обрабатывая в первую очередь тех, кто пришел позже всех
  */
 #ifndef CONFIG_DEBUG_LIST
 static inline void list_add(struct list_head *new, struct list_head *last)
@@ -130,6 +158,14 @@ extern void list_add(struct list_head *new, struct list_head *last);
  * Insert a new entry before the specified head.
  * This is useful for implementing queues.
  */
+ /*
+  я так и думал, что добавление в конец списка это значит вставить элемент между предыдущим и головой
+  в сущности понятия tail тоже нет. ведь из head можно пойти по next и тогда это стек
+  а можно пойти влево prev и тогда это обработка очереди
+  фактически тут добавляется элемент между head->prev (самым старым) и head
+  но тут все зависит от того, как написан макрос обхода элементов
+  возможно для того, чтобы макрос правильно работал и нужна эта функция
+  */
 static inline void list_add_tail(struct list_head *new, struct list_head *head)
 {
 	__list_add(new, head->prev, head);
@@ -200,9 +236,14 @@ static inline void list_add_tail_rcu(struct list_head *new,
  *
  * This is only for internal list manipulation where we know
  * the prev/next entries already!
+
+ просто удаляем элемент
+ просто напросто указатели в обе стороны перебиваются
+ написано что это внутренняя функция
  */
 static inline void __list_del(struct list_head * prev, struct list_head * next)
 {
+	// важная штука оказывается. именно prev сначала удаляется, prev это важный признак в list_empty_careful
 	next->prev = prev;
 	prev->next = next;
 }
@@ -212,6 +253,24 @@ static inline void __list_del(struct list_head * prev, struct list_head * next)
  * @entry: the element to delete from the list.
  * Note: list_empty() on entry does not return true after this, the entry is
  * in an undefined state.
+
+ list_empty какая-то
+ как круто, не надо обходить весь список и искать элемент
+ в сущности он у нас уже есть, можно удалять
+ кстати, в процессе итерации можно удалять сразу элементы, надеюсь там next удаляемого элемента запоминается
+ хотя и не факт. ведь цикл крутится пока entry->next не упрется в голову списка, плюс в конец pos = pos->next
+ к сожалению после выполнения этой функции entry next будут указывать на ядовитые указатели
+ надо будет это проверить
+ возможно все удаляемые списки надо собирать отдель и потом проходить по списку
+ т.е. выделять память
+ да, непростая это вещь, удалять элемент из списка
+ но по крайней мере удобно что обходить весь в поисках не надо
+ но наверное после удаления нужно заново обходить список, потому что entry будет запорото
+ эта просто удаляет, не обращая внимание на SMP
+
+ там ниже будет empty функция
+ вообще говоря тут написано что empty на этом элементе больше не работает
+ кстати, может быть поэтому разные POISON значения
  */
 #ifndef CONFIG_DEBUG_LIST
 static inline void list_del(struct list_head *entry)
@@ -225,8 +284,12 @@ extern void list_del(struct list_head *entry);
 #endif
 
 /**
- * list_del_rcu - deletes entry from list without re-initialization
+ * list_del_rcu - deletes entry from list without re-initialization (вот оно, сказано что позволяет удалять без прокрутки заново)
  * @entry: the element to delete from the list.
+
+   и да, что будет если список меняют одновременно, ведь нужна блокировка в этом случае
+   если уж это RCU список
+
  *
  * Note: list_empty() on entry does not return true after this,
  * the entry is in an undefined state. It is useful for RCU based
@@ -242,14 +305,23 @@ extern void list_del(struct list_head *entry);
  * However, it is perfectly legal to run concurrently with
  * the _rcu list-traversal primitives, such as
  * list_for_each_entry_rcu().
+
+   написано что если использовать _rcu итераторы, то менять список можно одновременно
+
  *
  * Note that the caller is not permitted to immediately free
  * the newly deleted entry.  Instead, either synchronize_rcu()
  * or call_rcu() must be used to defer freeing until an RCU
  * grace period has elapsed.
+
+   интересная вещь написано, что нельзя просто так сразу выкинуть элемент
+   какие-то синхронизаторы должны быть еще
+   и еще какой-то период
+
  */
 static inline void list_del_rcu(struct list_head *entry)
 {
+	// не понимаю, зачем еще присваивать LIST_POISON2?
 	__list_del(entry->prev, entry->next);
 	entry->prev = LIST_POISON2;
 }
@@ -260,6 +332,8 @@ static inline void list_del_rcu(struct list_head *entry)
  * @new : the new element to insert
  *
  * If @old was empty, it will be overwritten.
+ ну, тут понятно, просто переприсваиваем соседей
+ единственно насчет empty не понял, не понимаю и еще все это меняется без блокировок
  */
 static inline void list_replace(struct list_head *old,
 				struct list_head *new)
@@ -270,6 +344,10 @@ static inline void list_replace(struct list_head *old,
 	new->prev->next = new;
 }
 
+/*
+выбрасывает элемент и у выброшенного сбрасывает его prev/next
+вот собственно образец того, что нужно вызывать в коде и нельзя просто присваивание сделать
+*/
 static inline void list_replace_init(struct list_head *old,
 					struct list_head *new)
 {
@@ -293,12 +371,15 @@ static inline void list_replace_rcu(struct list_head *old,
 	smp_wmb();
 	new->next->prev = new;
 	new->prev->next = new;
-	old->prev = LIST_POISON2;
+	old->prev = LIST_POISON2; // зачем-то опять это здесь
 }
 
 /**
  * list_del_init - deletes entry from list and reinitialize it.
  * @entry: the element to delete from the list.
+ ну удаляется элемент, вся разница в том, что entry очищается от всех ссылок, где-то используется наверное
+ хотя казалось бы выкинут, ну и ладно
+ только об этом подумал, о перемещений в другой список
  */
 static inline void list_del_init(struct list_head *entry)
 {
@@ -310,6 +391,9 @@ static inline void list_del_init(struct list_head *entry)
  * list_move - delete from one list and add as another's head
  * @list: the entry to move
  * @head: the head that will precede our entry
+ странно, что написан list, вроде как должно быть entry
+ но функция переносит элемент из одного списка в другой, именно удаляя его
+ добавляет в начало списка
  */
 static inline void list_move(struct list_head *list, struct list_head *head)
 {
@@ -321,6 +405,7 @@ static inline void list_move(struct list_head *list, struct list_head *head)
  * list_move_tail - delete from one list and add as another's tail
  * @list: the entry to move
  * @head: the head that will follow our entry
+ тоже самое что и предыдущая функция, только на этот раз добавление идет в хвост
  */
 static inline void list_move_tail(struct list_head *list,
 				  struct list_head *head)
@@ -333,6 +418,11 @@ static inline void list_move_tail(struct list_head *list,
  * list_is_last - tests whether @list is the last entry in list @head
  * @list: the entry to test
  * @head: the head of the list
+ здесь константы описаны, возможно это связано с inline и помощь компилятору в оптимизации
+ мы как бы подсказываем что аргументы не меняются, компилятор это проверяет
+ и далее можно делать inline оптимизации
+ а так проверяется, что элемент последний
+ последний элемент это условность, но в любом случае указывает на голову списка
  */
 static inline int list_is_last(const struct list_head *list,
 				const struct list_head *head)
@@ -343,6 +433,11 @@ static inline int list_is_last(const struct list_head *list,
 /**
  * list_empty - tests whether a list is empty
  * @head: the list to test.
+ проверяет, что список пустой
+ ну, список пустой пока голова указывает сама на себя
+ тут еще дело в том, что пустой список или нет можно проверить на любом элементе
+ у любого элемента next не является он сам
+ все равно непонятно зачем два POISON, ведь head-то не меняется
  */
 static inline int list_empty(const struct list_head *head)
 {
@@ -352,6 +447,7 @@ static inline int list_empty(const struct list_head *head)
 /**
  * list_empty_careful - tests whether a list is empty and not being modified
  * @head: the list to test
+ да, тут описано не был ли он модифицирован, а не модифицируется прямо сейчас
  *
  * Description:
  * tests whether a list is empty _and_ checks that no other CPU might be
@@ -361,6 +457,23 @@ static inline int list_empty(const struct list_head *head)
  * can only be safe if the only activity that can happen
  * to the list entry is list_del_init(). Eg. it cannot be used
  * if another CPU could re-list_add() it.
+
+   что-то очень важно описано и видимо тут используется какая-то магия в последовательности изменения списка несколькими процессорами
+   я тут вижу что написано что делается проверка что другой процессор ничего не меняет, но вроде как все это построено на алгоритме доступа
+   магия!
+   да, второе условие для этого и создано
+   сначала считывается следующий элемент
+   далее проверяется что он не совпадает с головой и тут вроде как все нормально
+   но! есть второе условие
+   список пустой если следующий элемент это мы сами, но может оказаться так что после этого другой процессор все обновил!
+   почему сравнивается next во втором условии, а не head
+   суть в том, что пока мы считали первое условие, наш head поменяли, поменяли поля next и prev
+   и вторая проверка просто удостоверивается в том, что список не поменяли
+   ну, это не отменяет проблему ABA
+   я так понимаю что prev должен меняться в самую последнюю очередь?
+   или наоборот, в самую первую как указание на то, что началось изменение
+   когда вызывается list_del_init, то удаляемый элемент замыкается сам на себя
+   херня какая-то
  */
 static inline int list_empty_careful(const struct list_head *head)
 {
@@ -368,9 +481,15 @@ static inline int list_empty_careful(const struct list_head *head)
 	return (next == head) && (next == head->prev);
 }
 
+// добавляет список в начало другого списка
 static inline void __list_splice(struct list_head *list,
 				 struct list_head *head)
 {
+	// голова не добавляется
+	// голова вообще может быть статической
+	// кстати занятная штука, старый список не очищается
+	// а интересно, можно добавить часть списка, вырезать часть списка и добавить?
+	// наверное нельзя потому что будет добавлено все что после элемента, а не начиная с ...
 	struct list_head *first = list->next;
 	struct list_head *last = list->prev;
 	struct list_head *at = head->next;
@@ -389,7 +508,7 @@ static inline void __list_splice(struct list_head *list,
  */
 static inline void list_splice(struct list_head *list, struct list_head *head)
 {
-	if (!list_empty(list))
+	if (!list_empty(list)) // непонятно, но это видимо чтобы не добавлять голову, все равно список пустой
 		__list_splice(list, head);
 }
 
@@ -399,6 +518,8 @@ static inline void list_splice(struct list_head *list, struct list_head *head)
  * @head: the place to add it in the first list.
  *
  * The list at @list is reinitialised
+ добавляет в список, при этом старый список зануляется
+ зачем вообще это надо, может быть для перекачки списков из одной очереди в другую
  */
 static inline void list_splice_init(struct list_head *list,
 				    struct list_head *head)
@@ -470,6 +591,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * @ptr:	the &struct list_head pointer.
  * @type:	the type of the struct this is embedded in.
  * @member:	the name of the list_struct within the struct.
+ крутая штука, возвращает ссылку на объект-контейнер зная только list_head entry
  */
 #define list_entry(ptr, type, member) \
 	container_of(ptr, type, member)
@@ -481,6 +603,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * @member:	the name of the list_struct within the struct.
  *
  * Note, that list is expected to be not empty.
+ возвращает первый элемент из списка, последний добавленный
  */
 #define list_first_entry(ptr, type, member) \
 	list_entry((ptr)->next, type, member)
@@ -495,6 +618,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  передется имя переменной типа указатель куда будет сбрасываться указатель на определенный элемент итерации
  и передается список, точнее указатель на него. везде и всегда передается только указатель на список, а не он сам
  т.е. для переменных нужно использовать &
+ да, основной итератор, в pos будет получен list_head элемент
  */
 #define list_for_each(pos, head) \
 	for (pos = (head)->next; prefetch(pos->next), pos != (head); \
@@ -509,6 +633,8 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * simplest possible list iteration code, no prefetching is done.
  * Use this for code that knows the list to be very short (empty
  * or 1 entry) most of the time.
+ вариант без prefetch, написано использовать когда список очень короткий и чаще из одного элемента
+ смысла использовать prefetch в этом случае нет
  */
 #define __list_for_each(pos, head) \
 	for (pos = (head)->next; pos != (head); pos = pos->next)
@@ -517,6 +643,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * list_for_each_prev	-	iterate over a list backwards
  * @pos:	the &struct list_head to use as a loop cursor.
  * @head:	the head for your list.
+ итерация в обратном порядке, фактически в порядке добавлния элементов в список
  */
 #define list_for_each_prev(pos, head) \
 	for (pos = (head)->prev; prefetch(pos->prev), pos != (head); \
@@ -527,6 +654,10 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * @pos:	the &struct list_head to use as a loop cursor.
  * @n:		another &struct list_head to use as temporary storage
  * @head:	the head for your list.
+ то, о чем я думал. итерация в тот момент когда элемент удален
+ используя этот макрос можно удалять элементы из списка
+ макрос реализован за счет использования дополнительной n переменной куда сохраняется следующий элемент
+ мы просто восстанавливаем потом pos из n
  */
 #define list_for_each_safe(pos, n, head) \
 	for (pos = (head)->next, n = pos->next; pos != (head); \
@@ -537,6 +668,8 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * @pos:	the &struct list_head to use as a loop cursor.
  * @n:		another &struct list_head to use as temporary storage
  * @head:	the head for your list.
+ такая же фигня только в обратную сторону, теперь в n сохраняется prev
+ только тут работает prefetch, в прежнем методе я этого не видел
  */
 #define list_for_each_prev_safe(pos, n, head) \
 	for (pos = (head)->prev, n = pos->prev; \
@@ -548,6 +681,8 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * @pos:	the type * to use as a loop cursor.
  * @head:	the head for your list.
  * @member:	the name of the list_struct within the struct.
+ тоже крутая штука, только в этом случае итерация идет сразу по контейнеру
+ т.е. в pos можно получить сразу указатель на контейнер
  */
 #define list_for_each_entry(pos, head, member)				\
 	for (pos = list_entry((head)->next, typeof(*pos), member);	\
@@ -559,6 +694,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * @pos:	the type * to use as a loop cursor.
  * @head:	the head for your list.
  * @member:	the name of the list_struct within the struct.
+ тоже самое в обратном порядке
  */
 #define list_for_each_entry_reverse(pos, head, member)			\
 	for (pos = list_entry((head)->prev, typeof(*pos), member);	\
@@ -572,6 +708,10 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * @member:	the name of the list_struct within the struct.
  *
  * Prepares a pos entry for use as a start point in list_for_each_entry_continue().
+ херня какая-то, используется ?:
+ готовит первый элемент из головы списка
+ а прикольно, в качестве true значения возвращается сам же pos при этом это не указано!
+ да, нужно готовить с какого элемента начнется итерация, либо с pos, либо с головы
  */
 #define list_prepare_entry(pos, head, member) \
 	((pos) ? : list_entry(head, typeof(*pos), member))
@@ -584,6 +724,12 @@ static inline void list_splice_init_rcu(struct list_head *list,
  *
  * Continue to iterate over list of given type, continuing after
  * the current position.
+ я понял, есть элемент и он часть списка
+ позволяет итерацию начиная с этого элемента, а не с головы списка
+ видимо предыдущий метод готовит элемент для вращения
+ т.е. если есть, то используется как есть, иначе создается из головы
+ итерация начиная со следующего элемента
+ возможно в новых версиях list.h уже поменялся
  */
 #define list_for_each_entry_continue(pos, head, member) 		\
 	for (pos = list_entry(pos->member.next, typeof(*pos), member);	\
@@ -598,6 +744,8 @@ static inline void list_splice_init_rcu(struct list_head *list,
  *
  * Start to iterate over list of given type backwards, continuing after
  * the current position.
+ тоже самое только в обратном порядке
+ я понял разницу. тут идет итерация со следующего элемента
  */
 #define list_for_each_entry_continue_reverse(pos, head, member)		\
 	for (pos = list_entry(pos->member.prev, typeof(*pos), member);	\
@@ -611,6 +759,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * @member:	the name of the list_struct within the struct.
  *
  * Iterate over list of given type, continuing from current position.
+ pos настраивается на текущую позицию и будет первым же элементом в итерации
  */
 #define list_for_each_entry_from(pos, head, member) 			\
 	for (; prefetch(pos->member.next), &pos->member != (head);	\
@@ -622,6 +771,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * @n:		another type * to use as temporary storage
  * @head:	the head for your list.
  * @member:	the name of the list_struct within the struct.
+ итерация по каждому контейнеру начиная с головы с учетом возможных удалении
  */
 #define list_for_each_entry_safe(pos, n, head, member)			\
 	for (pos = list_entry((head)->next, typeof(*pos), member),	\
@@ -638,6 +788,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  *
  * Iterate over list of given type, continuing after current point,
  * safe against removal of list entry.
+ безопасная итерация после текущего элемента с учетом возможных удалении
  */
 #define list_for_each_entry_safe_continue(pos, n, head, member) 		\
 	for (pos = list_entry(pos->member.next, typeof(*pos), member), 		\
@@ -654,6 +805,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  *
  * Iterate over list of given type from current point, safe against
  * removal of list entry.
+ итерация начиная с некоторой точки включая ее же саму с учетом возможных удалении
  */
 #define list_for_each_entry_safe_from(pos, n, head, member) 			\
 	for (n = list_entry(pos->member.next, typeof(*pos), member);		\
@@ -669,6 +821,7 @@ static inline void list_splice_init_rcu(struct list_head *list,
  *
  * Iterate backwards over list of given type, safe against removal
  * of list entry.
+ тоже самое, только в обратном порядке начиная с некоторой точки включая ее
  */
 #define list_for_each_entry_safe_reverse(pos, n, head, member)		\
 	for (pos = list_entry((head)->prev, typeof(*pos), member),	\
@@ -750,6 +903,9 @@ static inline void list_splice_init_rcu(struct list_head *list,
  * Mostly useful for hash tables where the two pointer list head is
  * too wasteful.
  * You lose the ability to access the tail in O(1).
+ какая-то муть. двунаправленный список при этом голова списка имеет только один указатель
+ жесть, hlist
+ остальные функции пока не смотрел
  */
 
 struct hlist_head {

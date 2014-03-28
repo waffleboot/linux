@@ -7,6 +7,11 @@
  * under normal circumstances, used to verify that nobody uses
  * non-initialized list entries.
  */
+ /*
+ написано что это не пустые указатели, переход по которым гарантированно приводит к исключению страницы
+ используется при удалении элемента из списка путем присваиванию его prev/next значении
+ вот только зачем присваиваются два разных значения?
+ */
 #define LIST_POISON1  ((void *) 0x00100100)
 #define LIST_POISON2  ((void *) 0x00200200)
 
