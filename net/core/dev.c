@@ -150,6 +150,11 @@
  *		86DD	IPv6
  */
 
+/*
+это список обработчиков пакетов
+есть ptype_all для ETH_P_ALL и есть ptype_base, это массив на списки обработчиков пакетов
+ptype_base индекс это последние четыре бита hash от packet_type.type
+*/
 static DEFINE_SPINLOCK(ptype_lock);
 static struct list_head ptype_base[16] __read_mostly;	/* 16 way hashed list */
 static struct list_head ptype_all __read_mostly;	/* Taps */
@@ -358,6 +363,7 @@ static inline void netdev_set_lockdep_class(spinlock_t *lock,
 
 // тоже интересная функция, добавляет в разные кэши
 // ETH_P_ALL описан в include/linux/if_ether.h
+// когда инициализируется ip модуль, то эта функция вызывается
 void dev_add_pack(struct packet_type *pt)
 {
 	int hash;
@@ -388,7 +394,13 @@ void dev_add_pack(struct packet_type *pt)
 void __dev_remove_pack(struct packet_type *pt)
 {
 	struct list_head *head;
-	struct packet_type *pt1;
+	struct packet_type *list_entry;
+
+	// я вот только не понял, зачем мы сначала блокируем, а не потом
+	// можно ведь сначала опрелить голову списка и она всегда одна
+	// head это ведь указатель на постоянные вещи
+	// а интересно, эти указатели хоть кто-нибудь инициализирует
+	// в сущности нет ничего страшного, эта функция выполняется очень редко
 
 	spin_lock_bh(&ptype_lock);
 
@@ -397,8 +409,11 @@ void __dev_remove_pack(struct packet_type *pt)
 	else
 		head = &ptype_base[ntohs(pt->type) & 15];
 
-	list_for_each_entry(pt1, head, list) {
-		if (pt == pt1) {
+	// оказывается макрос использует typeof(*pos)
+	// для работы list_entry нужно обязательно передавать имя структуры потому что мы знаем только указатель на список в ее составе
+	// а для работы list_for_each_entry передается указатель на структуру и используя (typeof) мы определяем имя структуры
+	list_for_each_entry(list_entry, head, list) {
+		if (pt == list_entry) {
 			list_del_rcu(&pt->list);
 			goto out;
 		}
@@ -1768,6 +1783,7 @@ DEFINE_PER_CPU(struct netif_rx_stats, netdev_rx_stat) = { 0, };
  о как, описано что задача в том, чтобы закинуть сокетный буфер в wait queue on CPU specific, только не понял
  что это значит
  и выйти из прерывания
+ еще функция вызывается из dev_cpu_callback
  */
 int netif_rx(struct sk_buff *skb)
 {
@@ -1775,7 +1791,7 @@ int netif_rx(struct sk_buff *skb)
 	unsigned long flags;
 
 	/* if netpoll wants it, pretend we never saw it */
-	if (netpoll_rx(skb))
+	if (netpoll_rx(skb)) // не понимаю как это работает, но все это конфигурится через CONFIG_NET_POLL
 		return NET_RX_DROP;
 
 	if (!skb->tstamp.tv64)
@@ -1787,6 +1803,8 @@ int netif_rx(struct sk_buff *skb)
 	 */
 	local_irq_save(flags);
 	queue = &__get_cpu_var(softnet_data); // а вот кстати и softnet_data, это wait queue какая-то
+	// softnet_data это переменная, каждая для своего процессора
+	// у каждого процессора своя wait queue, поэтому нет необходимости лочиться на общем ресурсе
 
 	__get_cpu_var(netdev_rx_stat).total++;
     // хитрым образом организованный цикл
@@ -1794,8 +1812,10 @@ int netif_rx(struct sk_buff *skb)
     // получается только один процессор обрабатывает прерывание
     // и следующий пакет будет обработан другим процессором
     // а интересно, а можно обработку пакетов повесить на один проц?
+    // да, все верно
+    // softnet_data.input_pkt_queue.sk_buff_head (содержит prev/next и qlen)
 	if (queue->input_pkt_queue.qlen <= netdev_max_backlog) { // тут мы проверяем что еще можно добавлять в очередь задач, иначе пакет отбрасывается, несмотря на то, что в других процах есть еще место
-		if (queue->input_pkt_queue.qlen) {
+		if (queue->input_pkt_queue.qlen) { // в очереди кто-то есть
             // если в очереди есть кто-то, то просто добавляем пакет в очередь и сдвигаем очередь дальше, переводим указатель на хвост
             // если же в очереди никого нет, то запускается планировщик!
             // очень интересно написан цикл
@@ -1809,6 +1829,7 @@ enqueue:
         // а вот napi_schedule фунции я не нашел, есть только __napi_schedule
         // в netdevice.h определена, что странно
         // но дергается все равно __napi_schedule
+        // что интересно, здесь queue это ведь на каждый проц, соотв. backlog тоже на каждый проц
 		napi_schedule(&queue->backlog); // задача ставится на выполнение? да, т.к. до этого очередь была пуста, мы добавили себя, точнее добавим. и да, мы ставим на выполнение, а потом добавляем потому что это CPU specific очередь, т.е.
         // не начнет ее выполнять, потому что другим занят
 		goto enqueue;
@@ -1821,7 +1842,7 @@ enqueue:
 	__get_cpu_var(netdev_rx_stat).dropped++;
 	local_irq_restore(flags);
 
-	kfree_skb(skb);
+	kfree_skb(skb); // да, освобождается сокетный буфер и пакет выкидывается
 	return NET_RX_DROP;
 }
 
@@ -1855,7 +1876,9 @@ static inline struct net_device *skb_bond(struct sk_buff *skb)
 	return dev;
 }
 
-
+/*
+а это обработчик программного прерывания в ответ на получение пакетов
+*/
 static void net_tx_action(struct softirq_action *h)
 {
 	struct softnet_data *sd = &__get_cpu_var(softnet_data);
@@ -1864,6 +1887,9 @@ static void net_tx_action(struct softirq_action *h)
 		struct sk_buff *clist;
 
 		local_irq_disable();
+		// completion_queue это сокетные буферы
+		// мы их перекидывали как-то с одного проца на другой
+		// эта часть кода освобождает сокетные буферы из completion_queue, интересно как они туда попадают
 		clist = sd->completion_queue;
 		sd->completion_queue = NULL;
 		local_irq_enable();
@@ -1877,7 +1903,7 @@ static void net_tx_action(struct softirq_action *h)
 		}
 	}
 
-	if (sd->output_queue) {
+	if (sd->output_queue) { // тоже как-то перекидывали
 		struct net_device *head;
 
 		local_irq_disable();
@@ -1886,7 +1912,7 @@ static void net_tx_action(struct softirq_action *h)
 		local_irq_enable();
 
 		while (head) {
-			struct net_device *dev = head;
+			struct net_device *dev = head; // ссылка на само устройство. эту ссылку проставляет сам драйвер? наверное это связано с отправкой пакетов
 			head = head->next_sched;
 
 			smp_mb__before_clear_bit();
@@ -1907,10 +1933,16 @@ static inline int deliver_skb(struct sk_buff *skb,
 			      struct net_device *orig_dev)
 {
     // для каждого протокола дергается func!
+    // сама функция дергается еще и непосредственно из netif_receive_skb и вообще для всех обработчиков если обработчиков пакетов несколько
+    // только насколько я понимаю они шарят один и тот же буфер
+    // и можно в ptype_all подхачить сокетный буфер и другие будут уже жрать испорченный пакет
+    // а можно считать ETH_IP пакеты
 	atomic_inc(&skb->users);
 	return pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
 }
 
+// только в случае CONFIG_BRIDGE или CONFIG_BRIDGE_MODULE пробрасываем пакеты куда-то еще?
+// не понимаю как это работает, забиваю
 #if defined(CONFIG_BRIDGE) || defined (CONFIG_BRIDGE_MODULE)
 /* These hooks defined here for ATM */
 struct net_bridge;
@@ -1945,6 +1977,10 @@ static inline struct sk_buff *handle_bridge(struct sk_buff *skb,
 #define handle_bridge(skb, pt_prev, ret, orig_dev)	(skb)
 #endif
 
+// какие-то виртуальные интерфейсы
+// надо будет прочитать про это
+// позволяет посадить несколько MAC адресов на одну карту
+// вот только как карта об этом узнает?
 #if defined(CONFIG_MACVLAN) || defined(CONFIG_MACVLAN_MODULE)
 struct sk_buff *(*macvlan_handle_frame_hook)(struct sk_buff *skb) __read_mostly;
 EXPORT_SYMBOL_GPL(macvlan_handle_frame_hook);
@@ -1954,10 +1990,12 @@ static inline struct sk_buff *handle_macvlan(struct sk_buff *skb,
 					     int *ret,
 					     struct net_device *orig_dev)
 {
+	// проверяется, а не пришел ли пакет с виртуального устройства. если реальное устройство, то ничего не делаем
 	if (skb->dev->macvlan_port == NULL)
 		return skb;
 
 	if (*pt_prev) {
+		// пакет отправляется на обработку?
 		*ret = deliver_skb(skb, *pt_prev, orig_dev);
 		*pt_prev = NULL;
 	}
@@ -2046,6 +2084,7 @@ out:
  */
 /*
  вот добрались и до обработки пакета
+ вызывается из process_backlog
  */
 int netif_receive_skb(struct sk_buff *skb)
 {
@@ -2064,6 +2103,8 @@ int netif_receive_skb(struct sk_buff *skb)
 	if (!skb->iif)
 		skb->iif = skb->dev->ifindex;
 
+	// у устройства может быть dev->master Pointer to master device of a group, which this device is member of.
+	// либо возвращается skb->dev, либо NULL если есть мастер устройство видимо. сокетный буфер сбрасывается
 	orig_dev = skb_bond(skb);
 
 	if (!orig_dev)
@@ -2072,8 +2113,10 @@ int netif_receive_skb(struct sk_buff *skb)
 	__get_cpu_var(netdev_rx_stat).total++;
 
     // ух ты, что-то делаем с заголовком пакета
+    // настраиваем skb
 	skb_reset_network_header(skb);
 	skb_reset_transport_header(skb);
+	// видимо это только для ethernet устройств, только там есть MAC адрес
 	skb->mac_len = skb->network_header - skb->mac_header;
 
 	pt_prev = NULL;
@@ -2096,14 +2139,19 @@ int netif_receive_skb(struct sk_buff *skb)
     // важно что мы просто сравниваем устройство пакета с регистрацией и дергаем нужный обработчик
     // а может быть и ip вешается на то же устройство?
     // и для этого и используется pt_prev
+    // сначала обходим обработчики пакетов, которые зарегистрированы слушать все ethernet пакеты
 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
+		// если не указано на каком устройстве слушать пакеты, либо
+		// либо устройство обработчиков пакета совпадает с тем, что указано в сокетном буфере, т.е. то, что выставил драйвер
 		if (!ptype->dev || ptype->dev == skb->dev) {
 			if (pt_prev)
                 // а вот этого я не понял, что делает deliver_skb
                 // очень важная функция
                 // видимо эти протоколы регистрируются
                 // нужна видимо для того чтобы протоколы верхнего уровня дергали нижний уровень?
+                // круто, направляем пакет в обработчик pt_prev
 				ret = deliver_skb(skb, pt_prev, orig_dev);
+			// при первом проходе просто запоминаем
 			pt_prev = ptype;
 		}
 	}
@@ -2116,15 +2164,16 @@ ncls:
 #endif
 
     // может быть это проброс пакета
+	// видимо handle_bridge возвращает 0 если пакет нужно отбросить
 	skb = handle_bridge(skb, &pt_prev, &ret, orig_dev);
 	if (!skb)
 		goto out;
-    // а это что такое?
+    // а это что такое? видимо проверется, а не виртульное ли устройство прислало пакет?
 	skb = handle_macvlan(skb, &pt_prev, &ret, orig_dev);
 	if (!skb)
 		goto out;
 
-	type = skb->protocol;
+	type = skb->protocol; // а это где проставляется? в драйвере, при этом сетевой порядок байтов
     // видимо протоколы нижнего уровня в своих полях прописывают что за протокол
     // и дальше идет анализ. только протокол нижнего уровня знает что за данных он гонит
     // логика подсказывает что обрабатывается последний и до него
@@ -2133,11 +2182,17 @@ ncls:
 		    (!ptype->dev || ptype->dev == skb->dev)) {
 			if (pt_prev)
 				ret = deliver_skb(skb, pt_prev, orig_dev);
+				// вообще говоря основная функция здесь deliver_skb
+				// но здесь она дергается только если обработчиков ETH_IP пакетов несколько
+				// тут может дернуться обработчик для ptype_all кстати, т.к. шарят одну переменную
+				// именно так, ETH_P_IP, т.е. предполагается что все эти модули знают что обрабатывают IP в составе ETH
+				// возможно есть драйвер ATM_P_ETH
 			pt_prev = ptype;
 		}
 	}
 
 	if (pt_prev) {
+		// дергается только если это единственный обработчик
 		ret = pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
 	} else {
 		kfree_skb(skb);
@@ -2154,6 +2209,7 @@ out:
 
 // а вот и функция обработки очереди
 // и как я пропустил, что в книге именно process_backlog и описан?
+// на удивление эта штука дергается отдельно от softirq
 static int process_backlog(struct napi_struct *napi, int quota)
 {
 	int work = 0;
@@ -2161,13 +2217,15 @@ static int process_backlog(struct napi_struct *napi, int quota)
 	unsigned long start_time = jiffies;
 
 	napi->weight = weight_p; // не понимаю, откуда берется weight_p, а это глобальная переменная, видимо константа
+	// видимо сколько за раз пакетов можно обработать чтобы не вешать ядро
 	do {
 		struct sk_buff *skb;
 		struct net_device *dev;
 
 		local_irq_disable();
-		skb = __skb_dequeue(&queue->input_pkt_queue); // а вот и вытаскивается сокетный буфер или пакет
+		skb = __skb_dequeue(&queue->input_pkt_queue); // а вот и вытаскивается сокетный буфер или пакет, мы использовали это когда перекидывали пакеты
 		if (!skb) {
+			// пакетов больше нет
 			__napi_complete(napi);
 			local_irq_enable();
 			break;
@@ -2179,7 +2237,7 @@ static int process_backlog(struct napi_struct *napi, int quota)
 
 		netif_receive_skb(skb); // обработка пакета
 
-		dev_put(dev); // а вот и возврат. dev_hold был до этого где-то там
+		dev_put(dev); // а вот и возврат. dev_hold был до этого где-то там. был в функции, которую дергал драйвер, видимо разрешаем принимать пакеты с устройства?
 	} while (++work < quota && jiffies == start_time);
 
 	return work;
@@ -2196,6 +2254,7 @@ void fastcall __napi_schedule(struct napi_struct *n)
 	unsigned long flags;
 
 	local_irq_save(flags);
+	// poll_list из napi добавляется в процессорную snd
 	list_add_tail(&n->poll_list, &__get_cpu_var(softnet_data).poll_list);
     // ух ты какая вещь. дергается NET_RX_SOFTIRQ или не дергается?
     // сама по себе функция дергается когда приходит пакет и становится в wait queue
@@ -2423,6 +2482,7 @@ static int dev_ifconf(struct net *net, char __user *arg)
 }
 
 #ifdef CONFIG_PROC_FS
+// если хотим создать /proc файлы
 /*
  *	This is invoked by the /proc filesystem handler to display a device
  *	in detail.
@@ -2544,6 +2604,7 @@ static const struct seq_operations dev_seq_ops = {
 	.show  = dev_seq_show,
 };
 
+// круто, это дергается /proc/net/dev
 static int dev_seq_open(struct inode *inode, struct file *file)
 {
 	struct seq_file *seq;
@@ -2568,6 +2629,7 @@ static int dev_seq_release(struct inode *inode, struct file *file)
 	return seq_release(inode, file);
 }
 
+// о как, видимо при обращении к /proc/net/dev дергаются эти функции
 static const struct file_operations dev_seq_fops = {
 	.owner	 = THIS_MODULE,
 	.open    = dev_seq_open,
@@ -2725,10 +2787,12 @@ static const struct file_operations ptype_seq_fops = {
 };
 
 
+// да, для каждого net/netnamespace вызывается этот метод
 static int __net_init dev_proc_net_init(struct net *net)
 {
 	int rc = -ENOMEM;
 
+	// видимо /proc/net/dev /proc/net/softnet_stat и так далее создаются файлы
 	if (!proc_net_fops_create(net, "dev", S_IRUGO, &dev_seq_fops))
 		goto out;
 	if (!proc_net_fops_create(net, "softnet_stat", S_IRUGO, &softnet_seq_fops))
@@ -2766,10 +2830,13 @@ static struct pernet_operations __net_initdata dev_proc_ops = {
 
 static int __init dev_proc_init(void)
 {
+	// регистрируем dev_proc_ops
+	// заносим его в pernet_list и для каждого namespace будет вызываться метод init
 	return register_pernet_subsys(&dev_proc_ops);
 }
 #else
 #define dev_proc_init() 0
+// да, /proc/net можно отключить
 #endif	/* CONFIG_PROC_FS */
 
 
@@ -4034,6 +4101,7 @@ void free_netdev(struct net_device *dev)
 }
 
 /* Synchronize with packet receive processing. */
+// тоже интересная вещь, какая-то синхронизация
 void synchronize_net(void)
 {
 	might_sleep();
@@ -4193,7 +4261,7 @@ out:
 	return err;
 }
 
-// какая-то странная функция, непонятно что делает
+// какая-то странная функция, непонятно что делает, но ссылка на нее дается при инициализации
 static int dev_cpu_callback(struct notifier_block *nfb,
 			    unsigned long action,
 			    void *ocpu)
@@ -4201,26 +4269,39 @@ static int dev_cpu_callback(struct notifier_block *nfb,
 	struct sk_buff **list_skb;
 	struct net_device **list_net;
 	struct sk_buff *skb;
-	unsigned int cpu, oldcpu = (unsigned long)ocpu;
+	unsigned int cpu, oldcpu = (unsigned long)ocpu; // ну охуеть теперь
+	// вообще косяк
+	// допустим берется машина у которой int размером в 2 байта
+	// short у такой же машины тоже 2 байта
+	// long же у такой машины 4 байта
+	// ну, вообще-то говоря и указатель у такой машины тоже будет наверное 2 байта
+	// косяк в том, что long это не тоже самое что int
+	// и да, тут long не разваливается на два int, а просто инициализируется oldcpu
 	struct softnet_data *sd, *oldsd;
 
 	if (action != CPU_DEAD && action != CPU_DEAD_FROZEN)
 		return NOTIFY_OK;
 
 	local_irq_disable();
-	cpu = smp_processor_id();
+	cpu = smp_processor_id(); // ТВОЮ ЖЕ МАТЬ! ну теперь понятно где они инициализируют cpu
+	// не понимаю этой хуйни, ведь cpu не инициализирована, а макрос разворачивается в [cpu]. см. выше
 	sd = &per_cpu(softnet_data, cpu);
 	oldsd = &per_cpu(softnet_data, oldcpu);
 
 	/* Find end of our completion_queue. */
+	// я так понимаю что список сокетных буферов всегда заканчивается 0, т.е. это какой-то односторонний список?
+	// надо будет посмотреть как все это инициализируется, как создается сокетный буфер
+	// при этом ищется не последний элемент, а указатель на него, сам адрес этого поля
+	// потом это поле будем менять с 0 на другое значение
 	list_skb = &sd->completion_queue;
 	while (*list_skb)
 		list_skb = &(*list_skb)->next;
 	/* Append completion queue from offline CPU. */
-	*list_skb = oldsd->completion_queue;
+	*list_skb = oldsd->completion_queue; // простое перенаправление. с указателями конечно жесть
 	oldsd->completion_queue = NULL;
 
 	/* Find end of our output_queue. */
+	// такая же фигня
 	list_net = &sd->output_queue;
 	while (*list_net)
 		list_net = &(*list_net)->next_sched;
@@ -4228,10 +4309,17 @@ static int dev_cpu_callback(struct notifier_block *nfb,
 	*list_net = oldsd->output_queue;
 	oldsd->output_queue = NULL;
 
-	raise_softirq_irqoff(NET_TX_SOFTIRQ);
+	raise_softirq_irqoff(NET_TX_SOFTIRQ); // выставляется флаг чтобы обработать что-то в прерываниях
+	// непонятно вот что. есть completion_queue, есть output_queue - что это?
 	local_irq_enable();
 
 	/* Process offline CPU's input_pkt_queue */
+	// а это обрабатываются входящие пакеты со старого проца
+	// вообще какая-то странная функция. по своей логике перекидывает данные с одного проца на другой
+	// этот вызов вообще перекидывает сокетные буферы из старой очереди пакетов в новую
+	// передается сама очередь и уже она содержит указатели на элементы и количество
+	// и так пока не закончатся все пакеты, память не освобождается видимо
+	// кстати, пакеты могут быть отброшены!
 	while ((skb = __skb_dequeue(&oldsd->input_pkt_queue)))
 		netif_rx(skb);
 
@@ -4472,6 +4560,8 @@ static struct pernet_operations __net_initdata default_device_ops = {
 /*
  *       This is called single threaded during boot, so no need
  *       to take the rtnl semaphore.
+ видимо инициализация модуля
+ при старте ядра
  */
 static int __init net_dev_init(void)
 {
@@ -4485,10 +4575,15 @@ static int __init net_dev_init(void)
 	if (netdev_kobject_init())
 		goto out;
 
+	// а вот кстати и инициализация списков
+	// сначала настраиваем ptype_all
+	// а потом настраиваем ptype_base
+	// получается все указатели постоянны
 	INIT_LIST_HEAD(&ptype_all);
 	for (i = 0; i < 16; i++)
 		INIT_LIST_HEAD(&ptype_base[i]);
 
+	// регистрируем себя во всех net namespace
 	if (register_pernet_subsys(&netdev_net_ops))
 		goto out;
 
@@ -4499,13 +4594,14 @@ static int __init net_dev_init(void)
 	 *	Initialise the packet receive queues.
 	 */
 
+	// а вот где инициализируются softnet_data для каждого проца со всеми его очередями
 	for_each_possible_cpu(i) {
 		struct softnet_data *queue;
 
-		queue = &per_cpu(softnet_data, i);
-		skb_queue_head_init(&queue->input_pkt_queue);
-		queue->completion_queue = NULL;
-		INIT_LIST_HEAD(&queue->poll_list);
+		queue = &per_cpu(softnet_data, i); // просто вытаскивается адрес, по этому адресу еще ничего нет
+		skb_queue_head_init(&queue->input_pkt_queue); // настраивается список из сокетных буферов
+		queue->completion_queue = NULL; // фиг знает зачем, но используется в dev_cpu_callback
+		INIT_LIST_HEAD(&queue->poll_list); // инициализируется poll_list, видимо там будет что-то хранится
 
         /*
          какая интересная вещь
@@ -4514,6 +4610,7 @@ static int __init net_dev_init(void)
          и далее выставляется poll, который! есть функция
          т.е. где-то есть макрос, который дергает poll-функцию для каждого элемента
          в конечном счете все это дергается из net_rx_action
+         poll это указатель на функцию, где-то значит дергается
          */
 		queue->backlog.poll = process_backlog;
 		queue->backlog.weight = weight_p;
@@ -4538,7 +4635,7 @@ out:
 	return rc;
 }
 
-subsys_initcall(net_dev_init);
+subsys_initcall(net_dev_init); // здесь мы говорим ядру что надо бы инициализировать модуль
 
 EXPORT_SYMBOL(__dev_get_by_index);
 EXPORT_SYMBOL(__dev_get_by_name);
