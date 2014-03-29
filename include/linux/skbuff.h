@@ -781,6 +781,10 @@ static inline void __skb_queue_tail(struct sk_buff_head *list,
 {
 	struct sk_buff *prev, *next;
 
+	// однако! оказывается сокетные буферы не копируются.
+	// и наверное это правильно, они будут скопированы когда будет сделан вызов read из user land
+	// в общем, следующий вызов read будет читать уже из этих буферов
+
 	list->qlen++;
 	next = (struct sk_buff *)list;
 	prev = next->prev;
