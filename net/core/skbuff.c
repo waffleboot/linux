@@ -1488,6 +1488,9 @@ void skb_queue_head(struct sk_buff_head *list, struct sk_buff *newsk)
  *
  *	A buffer cannot be placed on two lists at the same time.
  */
+/*
+каждый сокет содержит sk_receive_queue
+*/
 void skb_queue_tail(struct sk_buff_head *list, struct sk_buff *newsk)
 {
 	unsigned long flags;
