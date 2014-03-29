@@ -20,6 +20,8 @@ struct net {
 	atomic_t		use_count;	/* To track references we
 						 * destroy on demand
 						 */
+	// у нас может быть несколько сетевых пространств
+	// и все они организованы в список
 	struct list_head	list;		/* list of network namespaces */
 	struct work_struct	work;		/* work struct for freeing */
 
@@ -134,6 +136,8 @@ static inline struct net *maybe_get_net(struct net *net)
 /*
  не понимаю, почему это не вынесено под макрос
  а, все правильно, глобальный список и не под макросом
+ это макрос для обхода всех сетевых пространств
+ передается имя переменной, а дальше обходится список net_namespace_list, каждый элемент net которого содержит list
  */
 #define for_each_net(VAR)				\
 	list_for_each_entry(VAR, &net_namespace_list, list)
