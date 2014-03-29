@@ -1736,6 +1736,12 @@ static inline int ip_mkroute_input(struct sk_buff *skb,
  *	2. IP spoofing attempts are filtered with 100% of guarantee.
  */
 
+ /*
+ передается сам сокетный буфер и IP-адреса
+ теперь зная IP адреса нужно найти кто на них подписан, кому они адресованы
+ блин, что за бред, для этого нужно вытащить порты
+ возможно я не туда смотрю
+ */
 static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 			       u8 tos, struct net_device *dev)
 {
