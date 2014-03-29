@@ -936,6 +936,7 @@ int udp_disconnect(struct sock *sk, int flags)
  * Note that in the success and error cases, the skb is assumed to
  * have either been requeued or freed.
  */
+// к этому моменту сокет уже известен по адресам и портам
 int udp_queue_rcv_skb(struct sock * sk, struct sk_buff *skb)
 {
 	struct udp_sock *up = udp_sk(sk);
@@ -1016,6 +1017,7 @@ int udp_queue_rcv_skb(struct sock * sk, struct sk_buff *skb)
 			goto drop;
 	}
 
+	// пробрасываем данные из сокет буфера в сокет
 	if ((rc = sock_queue_rcv_skb(sk,skb)) < 0) {
 		/* Note that an ENOMEM error is charged twice */
 		if (rc == -ENOMEM)
@@ -1118,6 +1120,7 @@ static inline int udp4_csum_init(struct sk_buff *skb, struct udphdr *uh,
  *	All we need to do is get the socket, and then do a checksum.
  */
 
+// вот и обработчик UDP
 int __udp4_lib_rcv(struct sk_buff *skb, struct hlist_head udptable[],
 		   int proto)
 {
@@ -1151,10 +1154,14 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct hlist_head udptable[],
 	if (rt->rt_flags & (RTCF_BROADCAST|RTCF_MULTICAST))
 		return __udp4_lib_mcast_deliver(skb, uh, saddr, daddr, udptable);
 
+	// а вот тут видимо ищется сокет кому можно отдать данные
+	// dest это видимо порт
 	sk = __udp4_lib_lookup(saddr, uh->source, daddr, uh->dest,
 			       inet_iif(skb), udptable);
 
 	if (sk != NULL) {
+		// тут идет копирование данных наверное
+		// у каждого сокета есть sk_receive_queue, туда добавляются данные
 		int ret = udp_queue_rcv_skb(sk, skb);
 		sock_put(sk);
 
@@ -1175,6 +1182,7 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct hlist_head udptable[],
 		goto csum_error;
 
 	UDP_INC_STATS_BH(UDP_MIB_NOPORTS, proto == IPPROTO_UDPLITE);
+	// видимо отправляется ICMP когда порт не найден
 	icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
 
 	/*
@@ -1213,6 +1221,7 @@ drop:
 	return 0;
 }
 
+// а вот наш обработчих входящих UDP
 int udp_rcv(struct sk_buff *skb)
 {
 	return __udp4_lib_rcv(skb, udp_hash, IPPROTO_UDP);
@@ -1445,7 +1454,7 @@ struct proto udp_prot = {
 	.sendmsg	   = udp_sendmsg,
 	.recvmsg	   = udp_recvmsg,
 	.sendpage	   = udp_sendpage,
-	.backlog_rcv	   = udp_queue_rcv_skb,
+	.backlog_rcv	   = udp_queue_rcv_skb, // почему регистрируем?
 	.hash		   = udp_lib_hash,
 	.unhash		   = udp_lib_unhash,
 	.get_port	   = udp_v4_get_port,
