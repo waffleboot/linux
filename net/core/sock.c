@@ -292,6 +292,7 @@ int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	 */
 	skb_len = skb->len;
 
+	// размещяем данные из сокет буфера в сокет
 	skb_queue_tail(&sk->sk_receive_queue, skb);
 
 	if (!sock_flag(sk, SOCK_DEAD))
@@ -1853,6 +1854,9 @@ static inline void inuse_fini(struct proto *prot)
 }
 #endif
 
+/*
+вот где оказывается описана эта функция, в сокетах
+*/
 int proto_register(struct proto *prot, int alloc_slab)
 {
 	char *request_sock_slab_name = NULL;
@@ -1910,6 +1914,7 @@ int proto_register(struct proto *prot, int alloc_slab)
 	}
 
 	write_lock(&proto_list_lock);
+	// добавляем протокол в список
 	list_add(&prot->node, &proto_list);
 	write_unlock(&proto_list_lock);
 	return 0;
