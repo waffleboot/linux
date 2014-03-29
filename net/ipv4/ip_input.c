@@ -195,6 +195,7 @@ int ip_call_ra_chain(struct sk_buff *skb)
 	return 0;
 }
 
+// доставка пакета наверх?
 static int ip_local_deliver_finish(struct sk_buff *skb)
 {
 	__skb_pull(skb, ip_hdrlen(skb));
@@ -205,7 +206,7 @@ static int ip_local_deliver_finish(struct sk_buff *skb)
 	rcu_read_lock();
 	{
 		/* Note: See raw.c and net/raw.h, RAWV4_HTABLE_SIZE==MAX_INET_PROTOS */
-		int protocol = ip_hdr(skb)->protocol;
+		int protocol = ip_hdr(skb)->protocol; // что за протокол пришел? TCP/UDP?
 		int hash;
 		struct sock *raw_sk;
 		struct net_protocol *ipprot;
@@ -230,7 +231,24 @@ static int ip_local_deliver_finish(struct sk_buff *skb)
 				}
 				nf_reset(skb);
 			}
-			ret = ipprot->handler(skb);
+			// под IP может ходить много протоколов, числом до 256. не, это размер таблицы такой
+			// добавление в таблицу идет через inet_add_protocol
+			// для этого используется inet_protos таблица
+			/*
+			IPPROTO_ICMP
+			IPPROTO_UDP
+			IPPROTO_TCP
+			IPPROTO_IGMP
+			IPPROTO_AH
+			IPPROTO_ESP
+			IPPROTO_GRE
+			IPPROTO_COMP
+			pim_protocol
+			IPPROTO_IPIP
+			IPPROTO_IPV6 - можно прятать ipv6 внутри ipv4
+			IPPROTO_UDPLITE
+			*/
+			ret = ipprot->handler(skb); // см. файл af_inet.c, именно там описан обработчик UDP как udp_rcv
 			if (ret < 0) {
 				protocol = -ret;
 				goto resubmit;
@@ -257,6 +275,8 @@ static int ip_local_deliver_finish(struct sk_buff *skb)
 /*
  * 	Deliver IP Packets to the higher protocol layers.
  */
+// вот оно! оказывается ip_route_input определяет, может быть пакет надо просто пробросить на другую сетевую карту?
+// а здесь пакет надо принять и обработать локально
 int ip_local_deliver(struct sk_buff *skb)
 {
 	/*
@@ -324,6 +344,7 @@ drop:
 	return -1;
 }
 
+// сложная штука, как она вызывается, но вызывается вроде из ip_rcv
 static int ip_rcv_finish(struct sk_buff *skb)
 {
 	const struct iphdr *iph = ip_hdr(skb);
@@ -365,6 +386,12 @@ static int ip_rcv_finish(struct sk_buff *skb)
 	else if (rt->rt_type == RTN_BROADCAST)
 		IP_INC_STATS_BH(IPSTATS_MIB_INBCASTPKTS);
 
+	/* Input packet from network to transport.  */
+	// короче, я запутался. вроде как эта функция должна вызываться
+	// и определять куда направить пакет
+	// снаружи нам передается сокетный буфер, но есть ли там dst
+	// потому что дергается функция dst.input
+	// и похоже для этого используется ip_route_input
 	return dst_input(skb);
 
 drop:
@@ -377,16 +404,22 @@ drop:
  */
 // ДА! Это главная функция обработки IP пакетов
 // видимо там вложенная обработка
+// входные параметры мне пока непонятны, надо будет посмотреть где идет ссылка на ip_rcv, но вроде
+// это стандартная функция
+// вызывается из dev.c по каждому входящему пакету
 int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct iphdr *iph;
 	u32 len;
 
+	// вот этого я не понимаю
 	if (dev->nd_net != &init_net)
 		goto drop;
 
 	/* When the interface is in promisc. mode, drop all the crap
 	 * that it receives, do not try to analyse it.
+	 видимо это драйвер выставляет
+	 т.е. нельзя словить весь трафик и направить его в сокет. логично. для этого используется af_packet
 	 */
 	if (skb->pkt_type == PACKET_OTHERHOST)
 		goto drop;
@@ -401,7 +434,7 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	if (!pskb_may_pull(skb, sizeof(struct iphdr)))
 		goto inhdr_error;
 
-	iph = ip_hdr(skb);
+	iph = ip_hdr(skb); // вытаскиваем заголовок IP
 
 	/*
 	 *	RFC1122: 3.1.2.2 MUST silently discard any IP frame that fails the checksum.
@@ -414,13 +447,13 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	 *	4.	Doesn't have a bogus length
 	 */
 
-	if (iph->ihl < 5 || iph->version != 4)
+	if (iph->ihl < 5 || iph->version != 4) // только IP4, хотя драйверу какая разница какой трафик ловить?
 		goto inhdr_error;
 
 	if (!pskb_may_pull(skb, iph->ihl*4))
 		goto inhdr_error;
 
-	iph = ip_hdr(skb);
+	iph = ip_hdr(skb); // зачем-то опять подвинулись
 
 	if (unlikely(ip_fast_csum((u8 *)iph, iph->ihl)))
 		goto inhdr_error;
@@ -444,7 +477,7 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	/* Remove any debris in the socket control block */
 	memset(IPCB(skb), 0, sizeof(struct inet_skb_parm));
 
-    // NF_HOOK это крюк
+    // NF_HOOK это крюк, может быть дергается ip_rcv_finish?
 	return NF_HOOK(PF_INET, NF_IP_PRE_ROUTING, skb, dev, NULL,
 		       ip_rcv_finish);
 
