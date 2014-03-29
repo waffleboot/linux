@@ -11,12 +11,19 @@
  *	Our network namespace constructor/destructor lists
  */
 
+/*
+есть pernet_list список
+есть first_device указатель на него
+сюда добавлются все pernet_operations
+*/
+
 static LIST_HEAD(pernet_list);
 static struct list_head *first_device = &pernet_list;
 static DEFINE_MUTEX(net_mutex);
 
 /*
  а вот где хранится реальный список сетевых пространств
+ точнее голова этого списка
  */
 LIST_HEAD(net_namespace_list);
 
