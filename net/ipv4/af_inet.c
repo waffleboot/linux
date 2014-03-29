@@ -844,6 +844,7 @@ const struct proto_ops inet_stream_ops = {
 #endif
 };
 
+// как странно, ведь в udp.c есть что-то похожее
 const struct proto_ops inet_dgram_ops = {
 	.family		   = PF_INET,
 	.owner		   = THIS_MODULE,
@@ -923,7 +924,7 @@ static struct inet_protosw inetsw_array[] =
 	{
 		.type =       SOCK_DGRAM,
 		.protocol =   IPPROTO_UDP,
-		.prot =       &udp_prot,
+		.prot =       &udp_prot, // описано в udp.c
 		.ops =        &inet_dgram_ops,
 		.capability = -1,
 		.no_check =   UDP_CSUM_DEFAULT,
@@ -1279,7 +1280,7 @@ static struct net_protocol tcp_protocol = {
 };
 
 static struct net_protocol udp_protocol = {
-	.handler =	udp_rcv,
+	.handler =	udp_rcv, // тут-то мы и регистрируем обработчик UDP. а дергается из ip_input.c
 	.err_handler =	udp_err,
 	.no_policy =	1,
 };
@@ -1343,10 +1344,14 @@ static int ipv4_proc_init(void);
 
 /*
  *	IP protocol layer initialiser
+ именно здесь описывается ссылка на ip_rcv функцию
+ тип пакетного обработчика описан как Ethernet IP
  */
 
 static struct packet_type ip_packet_type = {
+	// добавляется обработчик ethernet пакетов, в качестве типа указывается IP
 	.type = __constant_htons(ETH_P_IP), // это IP, получается там вложенные обработчики
+	// все правильно, именно htons должен использоваться, потому что все драйвера именно в таком виде его передают
 	.func = ip_rcv,
 	.gso_send_check = inet_gso_send_check,
 	.gso_segment = inet_gso_segment,
@@ -1365,6 +1370,9 @@ static int __init inet_init(void)
 	if (rc)
 		goto out;
 
+	// а вот этого я не понимаю
+	// я понял зачем это нужно. используется для вызовов из userland
+	// т.е. делая create или bind вызываются именно эти методы
 	rc = proto_register(&udp_prot, 1);
 	if (rc)
 		goto out_unregister_tcp_proto;
@@ -1381,11 +1389,13 @@ static int __init inet_init(void)
 
 	/*
 	 *	Add all the base protocols.
+	 а тут видимо добавляются обработчики входящих данных и отправители
+	 наверное
 	 */
 
 	if (inet_add_protocol(&icmp_protocol, IPPROTO_ICMP) < 0)
 		printk(KERN_CRIT "inet_init: Cannot add ICMP protocol\n");
-	if (inet_add_protocol(&udp_protocol, IPPROTO_UDP) < 0)
+	if (inet_add_protocol(&udp_protocol, IPPROTO_UDP) < 0) // а вот где добавляется обработчик UDP
 		printk(KERN_CRIT "inet_init: Cannot add UDP protocol\n");
 	if (inet_add_protocol(&tcp_protocol, IPPROTO_TCP) < 0)
 		printk(KERN_CRIT "inet_init: Cannot add TCP protocol\n");
@@ -1444,7 +1454,7 @@ static int __init inet_init(void)
 
 	ipfrag_init();
 
-    // добавляем обработчик
+    // добавляем обработчик пакетов
 	dev_add_pack(&ip_packet_type);
 
 	rc = 0;
@@ -1457,7 +1467,7 @@ out_unregister_tcp_proto:
 	goto out;
 }
 
-fs_initcall(inet_init);
+fs_initcall(inet_init); // о, это является частью ядра
 
 /* ------------------------------------------------------------------------ */
 
