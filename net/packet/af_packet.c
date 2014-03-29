@@ -84,6 +84,8 @@
 #include <net/inet_common.h>
 #endif
 
+ // крутая штука, это обработчик для SOCK_PACKET для прямого доступа к eth пакету
+
 /*
    Assumptions:
    - if device has no dev->hard_header routine, it adds and removes ll header
@@ -167,6 +169,7 @@ static int packet_set_ring(struct sock *sk, struct tpacket_req *req, int closing
 
 static void packet_flush_mclist(struct sock *sk);
 
+// какая-то структура, описывающая пакетный сокет или что там
 struct packet_sock {
 	/* struct sock has to be the first member of packet_sock */
 	struct sock		sk;
@@ -440,11 +443,23 @@ static inline unsigned int run_filter(struct sk_buff *skb, struct sock *sk,
    we will not harm anyone.
  */
 
+/*
+не знаю что такое BPF
+запускается когда надо обработать пакет
+packet type это то, что мы отдали когда вызвали dev_add_pack
+при каждом вызове socket мы вставляем обработчик на нижнем уровне
+и этот обработчик тянет вместе с собой информацию о сокете, о программном сокете из userland
+значит, при закрытии сокета нужно убрать этот обработчик пакетов
+а эта функция универсальная, поэтому она вытаскивает сокет из packet_type
+*/
 static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct sock *sk;
 	struct sockaddr_ll *sll;
 	struct packet_sock *po;
+	// запоминаем исходные значения user area
+	// дело в том, что все обработчики пакетов работают с одними и теми же данными и их надо восстанавливать
+	// после завершения обработки
 	u8 * skb_head = skb->data;
 	int skb_len = skb->len;
 	unsigned int snaplen, res;
@@ -455,10 +470,12 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 	if (skb->pkt_type == PACKET_LOOPBACK)
 		goto drop;
 
-	sk = pt->af_packet_priv;
-	po = pkt_sk(sk);
+	sk = pt->af_packet_priv; // af_packet_priv мы выставляем при создании сокета
+	po = pkt_sk(sk); // sk это первый атрибут po, так что можно нормально работать с указателями
 
-	skb->dev = dev;
+	skb->dev = dev; // а вот это круто, мы в сокетном буфере меняем устройство, зачем? т.е. прописываем его же
+
+	// а зачем? ведь pt_prev->func(skb, skb->dev, pt_prev, orig_dev); в dev.c может быть из другого места вызывается еще эта функция?
 
 	if (dev->header_ops) {
 		/* The device has an explicit notion of ll header,
@@ -469,9 +486,17 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 		   never delivered to user.
 		 */
 		if (sk->sk_type != SOCK_DGRAM)
+			// расширяем сокетный буфер на всю длину пакета
+			// еще раз, сокетный буфер заполняет драйвер и видимо он же выставляет границы в пакете или нет?
+			// да, наверное так и есть
+			// все равно непонятно, кто-то же выставляет границы в пакете? вот только устройство или dev.c и его обработчики пакетов
+			// add data to the start of a buffer
+			// This function extends the used data area of the buffer at the buffer start.
 			skb_push(skb, skb->data - skb_mac_header(skb));
 		else if (skb->pkt_type == PACKET_OUTGOING) {
 			/* Special case: outgoing packets have ll header at head */
+			// remove data from the start of a buffer
+			// This function removes data from the start of a buffer, returning the memory to the headroom
 			skb_pull(skb, skb_network_offset(skb));
 		}
 	}
@@ -484,11 +509,14 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 	if (snaplen > res)
 		snaplen = res;
 
+	// видимо проверяется что данные влезут в буфер
 	if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize >=
 	    (unsigned)sk->sk_rcvbuf)
 		goto drop_n_acct;
 
+	// если используется пакет еще кем-то?
 	if (skb_shared(skb)) {
+		// сокетный буфер клонируется, но user area остается прежней
 		struct sk_buff *nskb = skb_clone(skb, GFP_ATOMIC);
 		if (nskb == NULL)
 			goto drop_n_acct;
@@ -497,6 +525,8 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 			skb->data = skb_head;
 			skb->len = skb_len;
 		}
+		// типа не трогаем больше исходный сокетный буфер, а работаем с новым
+		// потом его же и освободим, только кто освободит user area или клоны этого не делают?
 		kfree_skb(skb);
 		skb = nskb;
 	}
@@ -531,6 +561,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev, struct packet
 
 	spin_lock(&sk->sk_receive_queue.lock);
 	po->stats.tp_packets++;
+	// видимо здесь пакет и забрасывается в сокет
 	__skb_queue_tail(&sk->sk_receive_queue, skb);
 	spin_unlock(&sk->sk_receive_queue.lock);
 	sk->sk_data_ready(sk, skb->len);
@@ -547,6 +578,8 @@ drop_n_restore:
 		skb->len = skb_len;
 	}
 drop:
+	// вот этой штуки не понимаю, идет освобождение сокетного буфера
+	// а может быть там стоит счетчик?
 	kfree_skb(skb);
 	return 0;
 }
@@ -955,6 +988,7 @@ out:
 	return err;
 }
 
+// какой модуль создается
 static struct proto packet_proto = {
 	.name	  = "PACKET",
 	.owner	  = THIS_MODULE,
@@ -963,6 +997,13 @@ static struct proto packet_proto = {
 
 /*
  *	Create a packet of type SOCK_PACKET.
+ все равно не понимаю, что передается в protocol?
+ вроде как идет снаружи, а должен быть из разряда ETH_P_IP к примеру
+ ведь сетевая карта именно в таком видет выдает ETH пакет
+ и регистрируемся мы также
+ вообще охереть можно, мы на каждый socket регистрируем свой обработчик получается
+ и как только потом разобраться откуда что пришло?
+ мы берем сокет, пропихиваем его в packet type, т.е. опускаем на уровень ниже, он там хранится, только там не знают
  */
 
 static int packet_create(struct net *net, struct socket *sock, int protocol)
@@ -973,30 +1014,35 @@ static int packet_create(struct net *net, struct socket *sock, int protocol)
 	int err;
 
 	if (net != &init_net)
+		// видимо только в начальном сетевом пространстве можно создавать эти сокеты
 		return -EAFNOSUPPORT;
 
-	if (!capable(CAP_NET_RAW))
+	if (!capable(CAP_NET_RAW)) // видимо проверяется что процесс может получить доступ к сети нижнего уровня, хотя не уверен в этом
 		return -EPERM;
 	if (sock->type != SOCK_DGRAM && sock->type != SOCK_RAW &&
 	    sock->type != SOCK_PACKET)
 		return -ESOCKTNOSUPPORT;
 
-	sock->state = SS_UNCONNECTED;
+	sock->state = SS_UNCONNECTED; // изначально нет соединения, хотя зачем это? а интересно, как регистрируется этот обработчик
 
 	err = -ENOBUFS;
 	sk = sk_alloc(net, PF_PACKET, GFP_KERNEL, &packet_proto);
 	if (sk == NULL)
 		goto out;
 
+	// оказывется есть два разных режима в зависимости от SOCK_DGRAM/SOCK_RAW/SOCK_PACKET
 	sock->ops = &packet_ops;
 	if (sock->type == SOCK_PACKET)
 		sock->ops = &packet_ops_spkt;
 
 	sock_init_data(sock, sk);
 
-	po = pkt_sk(sk);
+	po = pkt_sk(sk); // переводит sk в po, видимо содержит в начале packet_sock
+	// packet_sock содержит в самом начале sock sk
+	// указатель на структуру является указателем и на самый первый элемент, значит указатель на sk это и указатель на packet_sock
+	// только нужно знать что это packet_sock. точнее что есть достаточно места. а это определяется obj_size когда вызываем sk_alloc
 	sk->sk_family = PF_PACKET;
-	po->num = proto;
+	po->num = proto; // не понимаю, ссылка на структуру? а, блин, там же переменная и это протокол
 
 	sk->sk_destruct = packet_sock_destruct;
 	sk_refcnt_debug_inc(sk);
@@ -1011,9 +1057,12 @@ static int packet_create(struct net *net, struct socket *sock, int protocol)
 	if (sock->type == SOCK_PACKET)
 		po->prot_hook.func = packet_rcv_spkt;
 
+	// грязный хак, но мы берем программный сокет из userland и сохраняем его в информации о пакетном обработчике
 	po->prot_hook.af_packet_priv = sk;
 
 	if (proto) {
+		// ах ты ж сука, здесь же и прописывается какие пакеты мы ловим
+		// мы будем получать все пакеты eth уровня!
 		po->prot_hook.type = proto;
 		dev_add_pack(&po->prot_hook);
 		sock_hold(sk);
@@ -1852,8 +1901,9 @@ static const struct proto_ops packet_ops = {
 };
 
 static struct net_proto_family packet_family_ops = {
-	.family =	PF_PACKET,
-	.create =	packet_create,
+	.family =	PF_PACKET, // семейство PF_PACKET
+	.create =	packet_create, // видимо .create указывает на функцию, которая дергается когда вызывается int socket(int domain, int type, int protocol)
+	// видимо ядро по атрибутам socket определяет какую функцию вызвать
 	.owner	=	THIS_MODULE,
 };
 
@@ -1946,6 +1996,8 @@ static void __exit packet_exit(void)
 	sock_unregister(PF_PACKET);
 	proto_unregister(&packet_proto);
 }
+
+// создается в виде модуля
 
 static int __init packet_init(void)
 {
