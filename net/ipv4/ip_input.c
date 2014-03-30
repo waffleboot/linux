@@ -196,6 +196,7 @@ int ip_call_ra_chain(struct sk_buff *skb)
 }
 
 // доставка пакета наверх?
+// да, функция отсматривает что за протокол пришел и дергает его, проверяет по inet_protos
 static int ip_local_deliver_finish(struct sk_buff *skb)
 {
 	__skb_pull(skb, ip_hdrlen(skb));
@@ -277,17 +278,23 @@ static int ip_local_deliver_finish(struct sk_buff *skb)
  */
 // вот оно! оказывается ip_route_input определяет, может быть пакет надо просто пробросить на другую сетевую карту?
 // а здесь пакет надо принять и обработать локально
+// ссылка на эту функцию идет в route.c
 int ip_local_deliver(struct sk_buff *skb)
 {
 	/*
 	 *	Reassemble IP fragments.
 	 */
 
+	// ядро определяет что пакет фрагментирован по двум выставленным флагам
+	// в книге вроде неточность
 	if (ip_hdr(skb)->frag_off & htons(IP_MF | IP_OFFSET)) {
+		// ip_defrag обрабатывает пакет фрагмент и возможно собирает полный ip пакет
+		// если собрать полный пакет не удалось, то пакет отбрасывается
 		if (ip_defrag(skb, IP_DEFRAG_LOCAL_DELIVER))
 			return 0;
 	}
 
+	// опять программный хук на NF_IP_LOCAL_IN 
 	return NF_HOOK(PF_INET, NF_IP_LOCAL_IN, skb, skb->dev, NULL,
 		       ip_local_deliver_finish);
 }
@@ -344,7 +351,9 @@ drop:
 	return -1;
 }
 
-// сложная штука, как она вызывается, но вызывается вроде из ip_rcv
+// сложная штука, как она вызывается, но вызывается вроде из ip_rcv после обработки в netfilter
+// вызывает ip_route_input для определения, куму направить пакет, локально или дальше
+// заполняется dst в подпрограммах
 static int ip_rcv_finish(struct sk_buff *skb)
 {
 	const struct iphdr *iph = ip_hdr(skb);
@@ -355,6 +364,7 @@ static int ip_rcv_finish(struct sk_buff *skb)
 	 *	how the packet travels inside Linux networking.
 	 */
 	if (skb->dst == NULL) {
+		// все правильно, функция определяет кому направить пакет, локально или же прокинуть дальше
 		int err = ip_route_input(skb, iph->daddr, iph->saddr, iph->tos,
 					 skb->dev);
 		if (unlikely(err)) {
@@ -407,6 +417,16 @@ drop:
 // входные параметры мне пока непонятны, надо будет посмотреть где идет ссылка на ip_rcv, но вроде
 // это стандартная функция
 // вызывается из dev.c по каждому входящему пакету
+// ip_rcv публикуется как точка входа при регистрации пакетного обработчика с помощью dev_add_pack
+
+/*
+ip_rcv вызывается из dev.c, опубликована как func для обработчика пакетов
+ip_rcv_finish - после обработки пакета пользовательским хуком
+ip_route_input - чтобы определить dst.input
+dst.input - собственно обработчик
+ip_local_deliver - ссылка на нее формируется в route.c
+ip_local_deliver_finish - 
+*/
 int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct iphdr *iph;
@@ -478,6 +498,9 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 	memset(IPCB(skb), 0, sizeof(struct inet_skb_parm));
 
     // NF_HOOK это крюк, может быть дергается ip_rcv_finish?
+    // какая-то шняга этот netfilter для манипуляцией пакета из userland
+    // см. 12.8.6 как работает netfilter, в общем это вызов в userspace для модификации пакета
+    // NF_IP_PRE_ROUTING указывает какого рода фильтр дергается, дергается фильтр зарегистрированный по этому имени
 	return NF_HOOK(PF_INET, NF_IP_PRE_ROUTING, skb, dev, NULL,
 		       ip_rcv_finish);
 

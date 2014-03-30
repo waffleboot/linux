@@ -1401,6 +1401,7 @@ void ip_send_reply(struct sock *sk, struct sk_buff *skb, struct ip_reply_arg *ar
 	ip_rt_put(rt);
 }
 
+// что за функция?
 void __init ip_init(void)
 {
 	ip_rt_init();

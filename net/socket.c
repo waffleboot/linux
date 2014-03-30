@@ -118,6 +118,10 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
  *	in the operation structures but are done directly via the socketcall() multiplexor.
  */
 
+// а это какие функции надо дергать, когда userland работает с сокетами как с файлами
+// например userland дергает write над сокетом, это стандартная файловая функция
+// но так как это сокет, то дергаются эти функции, которые ведут на сетевой уровень
+// все это благодаря VFS, только id должен назначаться видимо одинаково
 static const struct file_operations socket_file_ops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
@@ -140,6 +144,7 @@ static const struct file_operations socket_file_ops = {
  *	The protocol list. Each protocol is registered in here.
  */
 
+// тут регистрируются транспортные протоколы
 static DEFINE_SPINLOCK(net_family_lock);
 static const struct net_proto_family *net_families[NPROTO] __read_mostly;
 
@@ -203,6 +208,7 @@ int move_addr_to_kernel(void __user *uaddr, int ulen, void *kaddr)
  *	specified. Zero is returned for a success.
  */
 
+// копирует адрес откуда пришел пакет в userarea
 int move_addr_to_user(void *kaddr, int klen, void __user *uaddr,
 		      int __user *ulen)
 {
@@ -219,6 +225,7 @@ int move_addr_to_user(void *kaddr, int klen, void __user *uaddr,
 	if (len) {
 		if (audit_sockaddr(klen, kaddr))
 			return -ENOMEM;
+		// собственно копирование
 		if (copy_to_user(uaddr, kaddr, len))
 			return -EFAULT;
 	}
@@ -293,6 +300,7 @@ static int sockfs_get_sb(struct file_system_type *fs_type,
 			     mnt);
 }
 
+// куда монтируем файлы-сокеты
 static struct vfsmount *sock_mnt __read_mostly;
 
 /*
@@ -329,7 +337,7 @@ static char *sockfs_dname(struct dentry *dentry, char *buffer, int buflen)
 
 static struct dentry_operations sockfs_dentry_operations = {
 	.d_delete = sockfs_delete_dentry,
-	.d_dname  = sockfs_dname,
+	.d_dname  = sockfs_dname, // видимо выдача имени директории?
 };
 
 /*
@@ -349,6 +357,7 @@ static struct dentry_operations sockfs_dentry_operations = {
  *	but we take care of internal coherence yet.
  */
 
+// создается файловый дескриптор
 static int sock_alloc_fd(struct file **filep)
 {
 	int fd;
@@ -372,13 +381,15 @@ static int sock_alloc_fd(struct file **filep)
  получается в дальнейшем можно просто писать в файл через write и все что будет записано в файл
  будет направляться в сокет. т.е. системный вызов write на файловом дескрипторе будет направляться в сокет
  видимо для этого и используется сокетная файловая система
- а интересно, mmap тоже можно делать?
+ а интересно, mmap тоже можно делать? да, вот только не могу найти как, это протокол специфичная вещь
+ нельзя
  */
 static int sock_attach_fd(struct socket *sock, struct file *file)
 {
 	struct dentry *dentry;
 	struct qstr name = { .name = "" };
 
+	// а, я понял, это директория
 	dentry = d_alloc(sock_mnt->mnt_sb->s_root, &name);
 	if (unlikely(!dentry))
 		return -ENOMEM;
@@ -393,23 +404,25 @@ static int sock_attach_fd(struct socket *sock, struct file *file)
 	d_instantiate(dentry, SOCK_INODE(sock));
 
 	sock->file = file;
+	// инициализируется файловый дескриптов, указываем какие операции можно выполнять над файлом
 	init_file(file, sock_mnt, dentry, FMODE_READ | FMODE_WRITE,
 		  &socket_file_ops);
 	SOCK_INODE(sock)->i_fop = &socket_file_ops;
 	file->f_flags = O_RDWR;
 	file->f_pos = 0;
-	file->private_data = sock;
+	file->private_data = sock; // а вот и привязка сокета к файлу
 
 	return 0;
 }
 
+// сокет привязывается к файлу
 int sock_map_fd(struct socket *sock)
 {
 	struct file *newfile;
-	int fd = sock_alloc_fd(&newfile);
+	int fd = sock_alloc_fd(&newfile); // создается файловый дескриптор
 
 	if (likely(fd >= 0)) {
-		int err = sock_attach_fd(sock, newfile);
+		int err = sock_attach_fd(sock, newfile); // сокет привязывается к файлу и файл привязывается к сокету для использования файловых операции
 
 		if (unlikely(err < 0)) {
 			put_filp(newfile);
@@ -974,7 +987,11 @@ static unsigned int sock_poll(struct file *file, poll_table *wait)
 
 static int sock_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	struct socket *sock = file->private_data;
+	// приходит файл
+	// у файла берется private data, которая по сути сокет
+	// сокет содержит файловые операции, которые можно выполнять
+	// дергается mmap
+	struct socket *sock = file->private_data; // видимо опять void*, интересно как создается эта структура, под нее выделяется место, как сокет регистрирует себя в файловой системе?
 
 	return sock->ops->mmap(file, sock, vma);
 }
@@ -1094,6 +1111,7 @@ call_kill:
 	return 0;
 }
 
+// дергается в ответ на socket()
 static int __sock_create(struct net *net, int family, int type, int protocol,
 			 struct socket **res, int kern)
 {
@@ -1170,7 +1188,7 @@ static int __sock_create(struct net *net, int family, int type, int protocol,
 	/* Now protected by module ref count */
 	rcu_read_unlock();
 
-	err = pf->create(net, sock, protocol);
+	err = pf->create(net, sock, protocol); // а вот и функция дергается на создание сокета
 	if (err < 0)
 		goto out_module_put;
 
@@ -1217,16 +1235,19 @@ int sock_create_kern(int family, int type, int protocol, struct socket **res)
 	return __sock_create(&init_net, family, type, protocol, res, 1);
 }
 
+// вызов socket
 asmlinkage long sys_socket(int family, int type, int protocol)
 {
 	int retval;
 	struct socket *sock;
 
+	// дергается создание сокета, дергается __sock_create
 	retval = sock_create(family, type, protocol, &sock);
 	if (retval < 0)
 		goto out;
 
-	retval = sock_map_fd(sock);
+	retval = sock_map_fd(sock); // возвращается файловый дескриптор
+	// что интересно, socketid который возвращается из socket() это fd, видимо поэтому его можно использовать в write/read
 	if (retval < 0)
 		goto out_release;
 
@@ -1684,6 +1705,7 @@ asmlinkage long sys_recvfrom(int fd, void __user *ubuf, size_t size,
 	err = sock_recvmsg(sock, &msg, size, flags);
 
 	if (err >= 0 && addr != NULL) {
+		// какая-то шняга
 		err2 = move_addr_to_user(address, msg.msg_namelen, addr, addr_len);
 		if (err2 < 0)
 			err = err2;
@@ -2011,6 +2033,9 @@ static const unsigned char nargs[18]={
 
 #undef AL
 
+// интересная техника, создать макрос, использовать его, а потом уничтожить
+// только почему-то sys_socketcall под условием __ARCH_WANT_SYS_SOCKETCALL
+
 /*
  *	System call vectors.
  *
@@ -2041,6 +2066,7 @@ asmlinkage long sys_socketcall(int call, unsigned long __user *args)
 
 	switch (call) {
 	case SYS_SOCKET:
+		// например, вызвана функция socket(), которая должна создать сокет
 		err = sys_socket(a0, a1, a[2]);
 		break;
 	case SYS_BIND:
@@ -2193,6 +2219,7 @@ static int __init sock_init(void)
 	 */
 
 	init_inodecache();
+	// монтируется файловая система, в которой хранятся сокеты
 	register_filesystem(&sock_fs_type);
 	sock_mnt = kern_mount(&sock_fs_type);
 

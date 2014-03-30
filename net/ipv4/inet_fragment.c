@@ -175,6 +175,7 @@ int inet_frag_evictor(struct inet_frags *f)
 }
 EXPORT_SYMBOL(inet_frag_evictor);
 
+// видимо добавляет фрагмент в очередь?
 static struct inet_frag_queue *inet_frag_intern(struct inet_frag_queue *qp_in,
 		struct inet_frags *f, unsigned int hash, void *arg)
 {
@@ -211,6 +212,10 @@ static struct inet_frag_queue *inet_frag_intern(struct inet_frag_queue *qp_in,
 	return qp;
 }
 
+// видимо выделяет место под очередь
+// дергается конструктор
+// выставлятеся таймер на очистку очереди
+// может случится так что очередь будет подчищена, а потом придет пакет, он наверное новую очередь создаст
 static struct inet_frag_queue *inet_frag_alloc(struct inet_frags *f, void *arg)
 {
 	struct inet_frag_queue *q;
@@ -228,6 +233,9 @@ static struct inet_frag_queue *inet_frag_alloc(struct inet_frags *f, void *arg)
 	return q;
 }
 
+// создать очередь для еще одного пакета
+// а ведь потом эту очередь нужно чистить если мусор останется
+// inet_frag_alloc создает таймер до кучи
 static struct inet_frag_queue *inet_frag_create(struct inet_frags *f,
 		void *arg, unsigned int hash)
 {
@@ -240,6 +248,7 @@ static struct inet_frag_queue *inet_frag_create(struct inet_frags *f,
 	return inet_frag_intern(q, f, hash, arg);
 }
 
+// ищет очередь, куда засунуть фрагментированный пакет
 struct inet_frag_queue *inet_frag_find(struct inet_frags *f, void *key,
 		unsigned int hash)
 {

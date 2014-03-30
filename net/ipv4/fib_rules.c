@@ -56,6 +56,8 @@ u32 fib_rules_tclass(struct fib_result *res)
 }
 #endif
 
+// собственно функция, которая определяет куда направить пакет
+// должна заполнить res.type
 int fib_lookup(struct flowi *flp, struct fib_result *res)
 {
 	struct fib_lookup_arg arg = {

@@ -116,10 +116,10 @@ struct sock_common {
 	volatile unsigned char	skc_state;
 	unsigned char		skc_reuse;
 	int			skc_bound_dev_if;
-	struct hlist_node	skc_node;
+	struct hlist_node	skc_node; // сокеты хранятся в хэш таблице
 	struct hlist_node	skc_bind_node;
 	atomic_t		skc_refcnt;
-	unsigned int		skc_hash;
+	unsigned int		skc_hash; // это хэш сокета
 	struct proto		*skc_prot;
 	struct net	 	*skc_net;
 };
@@ -215,7 +215,7 @@ struct sock {
 		struct sk_buff *head;
 		struct sk_buff *tail;
 	} sk_backlog;
-	wait_queue_head_t	*sk_sleep;
+	wait_queue_head_t	*sk_sleep; // это список процессов, ожидающих поступление данных
 	struct dst_entry	*sk_dst_cache;
 	struct xfrm_policy	*sk_policy[2];
 	rwlock_t		sk_dst_lock;
@@ -223,8 +223,8 @@ struct sock {
 	atomic_t		sk_wmem_alloc;
 	atomic_t		sk_omem_alloc;
 	int			sk_sndbuf;
-	struct sk_buff_head	sk_receive_queue;
-	struct sk_buff_head	sk_write_queue;
+	struct sk_buff_head	sk_receive_queue; // это данные для сокета полученные из сети
+	struct sk_buff_head	sk_write_queue; // это данные для отправки
 	struct sk_buff_head	sk_async_wait_queue;
 	int			sk_wmem_queued;
 	int			sk_forward_alloc;
@@ -257,7 +257,7 @@ struct sock {
 	int			sk_write_pending;
 	void			*sk_security;
 	void			(*sk_state_change)(struct sock *sk);
-	void			(*sk_data_ready)(struct sock *sk, int bytes);
+	void			(*sk_data_ready)(struct sock *sk, int bytes); // дергается когда данные размещаются в сокете
 	void			(*sk_write_space)(struct sock *sk);
 	void			(*sk_error_report)(struct sock *sk);
   	int			(*sk_backlog_rcv)(struct sock *sk,
@@ -735,6 +735,7 @@ static inline struct kiocb *siocb_to_kiocb(struct sock_iocb *si)
 	return si->kiocb;
 }
 
+// а вот и связка между сокетом и файловой системой!
 struct socket_alloc {
 	struct socket socket;
 	struct inode vfs_inode;

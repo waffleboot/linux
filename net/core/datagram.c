@@ -66,23 +66,30 @@ static inline int connection_based(struct sock *sk)
 
 /*
  * Wait for a packet..
+ например дергается recvfrom когда нет пакетов и стоит ожидание, когда блокирующее чтение
  */
 static int wait_for_packet(struct sock *sk, int *err, long *timeo_p)
 {
 	int error;
-	DEFINE_WAIT(wait);
+	DEFINE_WAIT(wait); // ух ты ж, что это?
 
+	// хер его знает как засыпает
+	// может быть именно в этой точке и засыпает
 	prepare_to_wait_exclusive(sk->sk_sleep, &wait, TASK_INTERRUPTIBLE);
+
+	// а тут типа проснулся?
 
 	/* Socket errors? */
 	error = sock_error(sk);
 	if (error)
 		goto out_err;
 
+	// если есть что принять, то выходим во внешний цикл, где будет чтение
 	if (!skb_queue_empty(&sk->sk_receive_queue))
 		goto out;
 
 	/* Socket shut down? */
+	// если сокет прибили
 	if (sk->sk_shutdown & RCV_SHUTDOWN)
 		goto out_noerr;
 
@@ -90,6 +97,7 @@ static int wait_for_packet(struct sock *sk, int *err, long *timeo_p)
 	 * If so we report the problem
 	 */
 	error = -ENOTCONN;
+	// видимо когда разбудили, а соединения так и не было
 	if (connection_based(sk) &&
 	    !(sk->sk_state == TCP_ESTABLISHED || sk->sk_state == TCP_LISTEN))
 		goto out_err;
@@ -99,7 +107,7 @@ static int wait_for_packet(struct sock *sk, int *err, long *timeo_p)
 		goto interrupted;
 
 	error = 0;
-	*timeo_p = schedule_timeout(*timeo_p);
+	*timeo_p = schedule_timeout(*timeo_p); // хер его знает зачем?
 out:
 	finish_wait(sk->sk_sleep, &wait);
 	return error;
@@ -143,6 +151,7 @@ out_noerr:
  *	quite explicitly by POSIX 1003.1g, don't change them without having
  *	the standard around please.
  */
+// дергается из recvfrom
 struct sk_buff *skb_recv_datagram(struct sock *sk, unsigned flags,
 				  int noblock, int *err)
 {
@@ -156,7 +165,7 @@ struct sk_buff *skb_recv_datagram(struct sock *sk, unsigned flags,
 	if (error)
 		goto no_packet;
 
-	timeo = sock_rcvtimeo(sk, noblock);
+	timeo = sock_rcvtimeo(sk, noblock); // а вот интересная вещь, передается флаг блокировки, на сколько засыпать?
 
 	do {
 		/* Again only user level code calls this function, so nothing
@@ -165,6 +174,7 @@ struct sk_buff *skb_recv_datagram(struct sock *sk, unsigned flags,
 		 * Look at current nfs client by the way...
 		 * However, this function was corrent in any case. 8)
 		 */
+		// если выставлен флаг MSG_PEEK, то видимо делается второй буферный сокет и он же и возвращается, а исходный остается
 		if (flags & MSG_PEEK) {
 			unsigned long cpu_flags;
 
@@ -176,6 +186,7 @@ struct sk_buff *skb_recv_datagram(struct sock *sk, unsigned flags,
 			spin_unlock_irqrestore(&sk->sk_receive_queue.lock,
 					       cpu_flags);
 		} else
+			// а вот тут вытаскивается сокетный буфер, интересно а как же блокировка?
 			skb = skb_dequeue(&sk->sk_receive_queue);
 
 		if (skb)
@@ -186,7 +197,7 @@ struct sk_buff *skb_recv_datagram(struct sock *sk, unsigned flags,
 		if (!timeo)
 			goto no_packet;
 
-	} while (!wait_for_packet(sk, err, &timeo));
+	} while (!wait_for_packet(sk, err, &timeo)); // видимо уходит в блокировку до ожидания
 
 	return NULL;
 
@@ -254,6 +265,7 @@ int skb_copy_datagram_iovec(const struct sk_buff *skb, int offset,
 	if (copy > 0) {
 		if (copy > len)
 			copy = len;
+		// в конечном счете дергается copy_to_user
 		if (memcpy_toiovec(to, skb->data + offset, copy))
 			goto fault;
 		if ((len -= copy) == 0)

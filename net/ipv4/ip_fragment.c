@@ -93,6 +93,7 @@ struct inet_frags_ctl ip4_frags_ctl __read_mostly = {
 	.secret_interval = 10 * 60 * HZ,
 };
 
+// используется для фрагментации, содержит ссылки на функции
 static struct inet_frags ip4_frags;
 
 int ip_frag_nqueues(void)
@@ -128,10 +129,11 @@ static unsigned int ip4_hashfn(struct inet_frag_queue *q)
 	return ipqhashfn(ipq->id, ipq->saddr, ipq->daddr, ipq->protocol);
 }
 
+// используется чтобы определить, подходит ли очередь под пакет
 static int ip4_frag_match(struct inet_frag_queue *q, void *a)
 {
 	struct ipq *qp;
-	struct ip4_create_arg *arg = a;
+	struct ip4_create_arg *arg = a; // проставляем ссылку без приведения типа, фактически идет из ip_find, там идет заголовок и user
 
 	qp = container_of(q, struct ipq, q);
 	return (qp->id == arg->iph->id &&
@@ -150,6 +152,7 @@ static __inline__ void frag_kfree_skb(struct sk_buff *skb, int *work)
 	kfree_skb(skb);
 }
 
+// используется при создании очереди из фрагментов ip пакета
 static void ip4_frag_init(struct inet_frag_queue *q, void *a)
 {
 	struct ipq *qp = container_of(q, struct ipq, q);
@@ -246,6 +249,7 @@ static inline struct ipq *ip_find(struct iphdr *iph, u32 user)
 	arg.user = user;
 	hash = ipqhashfn(iph->id, iph->saddr, iph->daddr, iph->protocol);
 
+	// ip4_frags использует функции конструктор и match
 	q = inet_frag_find(&ip4_frags, &arg, hash);
 	if (q == NULL)
 		goto out_nomem;
@@ -308,6 +312,10 @@ static int ip_frag_reinit(struct ipq *qp)
 }
 
 /* Add new segment to existing queue. */
+// есть IP пакет, исходный
+// есть его фрагмент
+// возможно просто сокетный буфер исходного IP расширяется и заполняется фрагментами - нет, я был не прав
+// есть ip_frag_reasm
 static int ip_frag_queue(struct ipq *qp, struct sk_buff *skb)
 {
 	struct sk_buff *prev, *next;
@@ -579,6 +587,9 @@ out_fail:
 }
 
 /* Process an incoming IP datagram fragment. */
+// пришел фрагментированный пакет, интересно как ядро его собирает, использует ли один и тот же буфер?
+// и как обрабатывается последний пакет из фрагментов
+// второй параметр вроде IP_DEFRAG_LOCAL_DELIVER при доставке локально
 int ip_defrag(struct sk_buff *skb, u32 user)
 {
 	struct ipq *qp;
@@ -590,6 +601,7 @@ int ip_defrag(struct sk_buff *skb, u32 user)
 		ip_evictor();
 
 	/* Lookup (or create) queue header */
+	// ищется очередь куда добавить пакет, но видимо find не добавляет пакет, я был не прав
 	if ((qp = ip_find(ip_hdr(skb), user)) != NULL) {
 		int ret;
 
@@ -607,6 +619,7 @@ int ip_defrag(struct sk_buff *skb, u32 user)
 	return -ENOMEM;
 }
 
+// инициализируется ip4_frags
 void __init ipfrag_init(void)
 {
 	ip4_frags.ctl = &ip4_frags_ctl;

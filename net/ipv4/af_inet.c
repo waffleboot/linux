@@ -241,6 +241,7 @@ EXPORT_SYMBOL(build_ehash_secret);
  *	Create an inet socket.
  */
 
+// дергается в ответ на socket
 static int inet_create(struct net *net, struct socket *sock, int protocol)
 {
 	struct sock *sk;
@@ -348,6 +349,7 @@ lookup_protocol:
 
 	inet->id = 0;
 
+	// инициализируется сокет, настраиваются его очереди
 	sock_init_data(sock, sk);
 
 	sk->sk_destruct	   = inet_sock_destruct;
@@ -901,7 +903,7 @@ static const struct proto_ops inet_sockraw_ops = {
 
 static struct net_proto_family inet_family_ops = {
 	.family = PF_INET,
-	.create = inet_create,
+	.create = inet_create, // эта функция потом дергается из socket.c, точнее вплоть до syscall
 	.owner	= THIS_MODULE,
 };
 
@@ -1385,6 +1387,7 @@ static int __init inet_init(void)
 	 *	Tell SOCKET that we are alive...
 	 */
 
+	 // все это регистрируется в net_families
 	(void)sock_register(&inet_family_ops);
 
 	/*
@@ -1419,6 +1422,7 @@ static int __init inet_init(void)
 
 	/*
 	 *	Set the IP module up
+	 через нее же создаются кэши
 	 */
 
 	ip_init();
@@ -1452,6 +1456,7 @@ static int __init inet_init(void)
 
 	ipv4_proc_init();
 
+	// инициализируем модуль, отвечающий за фрагментацию пакетов
 	ipfrag_init();
 
     // добавляем обработчик пакетов

@@ -1686,7 +1686,7 @@ static inline int __mkroute_input(struct sk_buff *skb,
 	rth->fl.oif 	= 0;
 	rth->rt_spec_dst= spec_dst;
 
-	rth->u.dst.input = ip_forward;
+	rth->u.dst.input = ip_forward; // для проброски пакета дальше
 	rth->u.dst.output = ip_output;
 
 	rt_set_nexthop(rth, res, itag);
@@ -1741,6 +1741,8 @@ static inline int ip_mkroute_input(struct sk_buff *skb,
  теперь зная IP адреса нужно найти кто на них подписан, кому они адресованы
  блин, что за бред, для этого нужно вытащить порты
  возможно я не туда смотрю
+ запускается когда нет в кэше маршрута
+ видимо куда направить пакет кэшируется
  */
 static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 			       u8 tos, struct net_device *dev)
@@ -1790,6 +1792,7 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 	/*
 	 *	Now we are ready to route packet.
 	 */
+	// здесь заполняется res.type
 	if ((err = fib_lookup(&fl, &res)) != 0) {
 		if (!IN_DEV_FORWARD(in_dev))
 			goto e_hostunreach;
@@ -1812,7 +1815,7 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 		if (result)
 			flags |= RTCF_DIRECTSRC;
 		spec_dst = daddr;
-		goto local_input;
+		goto local_input; // это локальный пакет, иначе forward
 	}
 
 	if (!IN_DEV_FORWARD(in_dev))
@@ -1820,7 +1823,7 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 	if (res.type != RTN_UNICAST)
 		goto martian_destination;
 
-	err = ip_mkroute_input(skb, &res, &fl, in_dev, daddr, saddr, tos);
+	err = ip_mkroute_input(skb, &res, &fl, in_dev, daddr, saddr, tos); // если forward нужен
 done:
 	in_dev_put(in_dev);
 	if (free_res)
@@ -1872,6 +1875,7 @@ local_input:
 	rth->idev	= in_dev_get(rth->u.dst.dev);
 	rth->rt_gateway	= daddr;
 	rth->rt_spec_dst= spec_dst;
+	// все правильно, идет ссылка на dst.input, потом ip_local_deliver будет дергаться
 	rth->u.dst.input= ip_local_deliver;
 	rth->rt_flags 	= flags|RTCF_LOCAL;
 	if (res.type == RTN_UNREACHABLE) {
@@ -1921,6 +1925,11 @@ martian_source:
 	goto e_inval;
 }
 
+// описана в 12.8.5 книги
+// функция выбирает, куда направить этот пакет
+// дергается из ip_input.c, фактически из ip_rcv
+// выбирает маршрут возможно с учетом кэша или может быть кэш выше был
+// если в кэше нету, то запускает ip_route_input_slow
 int ip_route_input(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 		   u8 tos, struct net_device *dev)
 {
@@ -1950,6 +1959,7 @@ int ip_route_input(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 	}
 	rcu_read_unlock();
 
+	// какой-то route cache используется
 	/* Multicast recognition logic is moved from route cache to here.
 	   The problem was that too many Ethernet cards have broken/missing
 	   hardware multicast filters :-( As result the host on multicasting
@@ -2070,6 +2080,7 @@ static inline int __mkroute_output(struct rtable **result,
 	RT_CACHE_STAT_INC(out_slow_tot);
 
 	if (flags & RTCF_LOCAL) {
+		// именно здесь определяется что пакет нужно направить в локальную машину
 		rth->u.dst.input = ip_local_deliver;
 		rth->rt_spec_dst = fl->fl4_dst;
 	}
@@ -2103,6 +2114,7 @@ static inline int __mkroute_output(struct rtable **result,
 	return err;
 }
 
+// фактически обертка над __mkroute_output, которая описывает куда направить пакет
 static inline int ip_mkroute_output(struct rtable **rp,
 				    struct fib_result* res,
 				    const struct flowi *fl,
@@ -2125,6 +2137,8 @@ static inline int ip_mkroute_output(struct rtable **rp,
  * Major route resolver routine.
  */
 
+// фиг его знает, может быть до этого работал кэш, который быстро по ip определяет куда направить запрос
+// а эта функция на случай, когда пришел пакет которого нет в кэше
 static int ip_route_output_slow(struct rtable **rp, const struct flowi *oldflp)
 {
 	u32 tos	= RT_FL_TOS(oldflp);
@@ -2307,6 +2321,7 @@ static int ip_route_output_slow(struct rtable **rp, const struct flowi *oldflp)
 
 
 make_route:
+	// собственно начало цепочки которая приводит к обработке пакета локально
 	err = ip_mkroute_output(rp, &res, &fl, oldflp, dev_out, flags);
 
 
@@ -2925,6 +2940,7 @@ static int __init set_rhash_entries(char *str)
 }
 __setup("rhash_entries=", set_rhash_entries);
 
+// что за функция?
 int __init ip_rt_init(void)
 {
 	int rc = 0;
@@ -2951,6 +2967,7 @@ int __init ip_rt_init(void)
 
 	ipv4_dst_blackhole_ops.kmem_cachep = ipv4_dst_ops.kmem_cachep;
 
+	// ух ты, кэш!
 	rt_hash_table = (struct rt_hash_bucket *)
 		alloc_large_system_hash("IP route cache",
 					sizeof(struct rt_hash_bucket),

@@ -111,6 +111,8 @@
 
 DEFINE_SNMP_STAT(struct udp_mib, udp_statistics) __read_mostly;
 
+// массив из сокетов, которым предназначен пакет
+// вот только как туда попадает inet_sock?
 struct hlist_head udp_hash[UDP_HTABLE_SIZE];
 DEFINE_RWLOCK(udp_hash_lock);
 
@@ -245,6 +247,7 @@ static inline int udp_v4_get_port(struct sock *sk, unsigned short snum)
 /* UDP is nearly always wildcards out the wazoo, it makes no sense to try
  * harder than this. -DaveM
  */
+// ищет программный сокет, кому нужно отдать пакет
 static struct sock *__udp4_lib_lookup(__be32 saddr, __be16 sport,
 				      __be32 daddr, __be16 dport,
 				      int dif, struct hlist_head udptable[])
@@ -255,6 +258,8 @@ static struct sock *__udp4_lib_lookup(__be32 saddr, __be16 sport,
 	int badness = -1;
 
 	read_lock(&udp_hash_lock);
+	// по хэшу определяем куда забросить пакет
+	// список хранит объекты inet_sock по сути
 	sk_for_each(sk, node, &udptable[hnum & (UDP_HTABLE_SIZE - 1)]) {
 		struct inet_sock *inet = inet_sk(sk);
 
@@ -818,6 +823,7 @@ int udp_ioctl(struct sock *sk, int cmd, unsigned long arg)
  * 	return it, otherwise we block.
  */
 
+// дергается в ответ на recvfrom
 int udp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		size_t len, int noblock, int flags, int *addr_len)
 {
@@ -860,6 +866,7 @@ try_again:
 			goto csum_copy_err;
 	}
 
+	// в конечном счете дергается copy_to_user. msg хранит в себе указание куда сбрасывать данные
 	if (skb_csum_unnecessary(skb))
 		err = skb_copy_datagram_iovec(skb, sizeof(struct udphdr),
 					      msg->msg_iov, copied       );
@@ -1018,6 +1025,7 @@ int udp_queue_rcv_skb(struct sock * sk, struct sk_buff *skb)
 	}
 
 	// пробрасываем данные из сокет буфера в сокет
+	// эта же функция уведомляет и видимо будит процессы
 	if ((rc = sock_queue_rcv_skb(sk,skb)) < 0) {
 		/* Note that an ENOMEM error is charged twice */
 		if (rc == -ENOMEM)

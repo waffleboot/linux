@@ -622,6 +622,7 @@ out:
    only when netlink is already locked.
  */
 
+// что-то настраивается, но видел где вызов идет с RTN_LOCAL
 static void fib_magic(int cmd, int type, __be32 dst, int dst_len, struct in_ifaddr *ifa)
 {
 	struct fib_table *tb;
@@ -909,6 +910,7 @@ static struct notifier_block fib_netdev_notifier = {
 	.notifier_call =fib_netdev_event,
 };
 
+// какая-то шняга регистрируется
 void __init ip_fib_init(void)
 {
 	unsigned int i;

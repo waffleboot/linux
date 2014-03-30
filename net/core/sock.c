@@ -295,6 +295,7 @@ int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 	// размещяем данные из сокет буфера в сокет
 	skb_queue_tail(&sk->sk_receive_queue, skb);
 
+	// ага! дергается sk_data_ready функция!
 	if (!sock_flag(sk, SOCK_DEAD))
 		sk->sk_data_ready(sk, skb_len);
 out:
@@ -1461,6 +1462,7 @@ int sock_no_recvmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *m,
 	return -EOPNOTSUPP;
 }
 
+// mmap не поддерживается
 int sock_no_mmap(struct file *file, struct socket *sock, struct vm_area_struct *vma)
 {
 	/* Mirror missing mmap method error code */
@@ -1501,10 +1503,14 @@ static void sock_def_error_report(struct sock *sk)
 	read_unlock(&sk->sk_callback_lock);
 }
 
+// функция приема данные по умолчанию
+// дергается когда приходит пакет, точнее когда добавляются новые данные во входном буфере
 static void sock_def_readable(struct sock *sk, int len)
 {
 	read_lock(&sk->sk_callback_lock);
+	// sk_sleep это очередь из процессов, ожидающих данные
 	if (sk->sk_sleep && waitqueue_active(sk->sk_sleep))
+		// походу дела будятся процессы
 		wake_up_interruptible(sk->sk_sleep);
 	sk_wake_async(sk,1,POLL_IN);
 	read_unlock(&sk->sk_callback_lock);
@@ -1558,6 +1564,8 @@ void sk_stop_timer(struct sock *sk, struct timer_list* timer)
 
 EXPORT_SYMBOL(sk_stop_timer);
 
+// при создании сокета дергается
+// инициализирует все очереди
 void sock_init_data(struct socket *sock, struct sock *sk)
 {
 	skb_queue_head_init(&sk->sk_receive_queue);
@@ -1593,6 +1601,7 @@ void sock_init_data(struct socket *sock, struct sock *sk)
 			af_family_clock_key_strings[sk->sk_family]);
 
 	sk->sk_state_change	=	sock_def_wakeup;
+	// это основная функция чтобы разбудить процессы, дергается когда приходит пакет
 	sk->sk_data_ready	=	sock_def_readable;
 	sk->sk_write_space	=	sock_def_write_space;
 	sk->sk_error_report	=	sock_def_error_report;
@@ -1726,6 +1735,7 @@ int sock_common_recvmsg(struct kiocb *iocb, struct socket *sock,
 	int addr_len = 0;
 	int err;
 
+	// флаг блокировки MSG_DONTWAIT
 	err = sk->sk_prot->recvmsg(iocb, sk, msg, size, flags & MSG_DONTWAIT,
 				   flags & ~MSG_DONTWAIT, &addr_len);
 	if (err >= 0)

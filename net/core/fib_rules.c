@@ -153,6 +153,7 @@ out:
 	return (rule->flags & FIB_RULE_INVERT) ? !ret : ret;
 }
 
+// функция должна определить, куда направить пакет, локально или глобально
 int fib_rules_lookup(struct fib_rules_ops *ops, struct flowi *fl,
 		     int flags, struct fib_lookup_arg *arg)
 {

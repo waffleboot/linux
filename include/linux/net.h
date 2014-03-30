@@ -112,15 +112,17 @@ enum sock_shutdown_cmd {
  *  @wait: wait queue for several uses
  *  @type: socket type (%SOCK_STREAM, etc)
  */
+// основная структура - сокеты, это уже для userland
 struct socket {
-	socket_state		state;
+	socket_state		state; // состояние сокета, это enum, в сущности это видно по тому что нет struct
+	// ничего общего с транспортным уровнем, только для userland
 	unsigned long		flags;
-	const struct proto_ops	*ops;
+	const struct proto_ops	*ops; // операции, доступные на сокете
 	struct fasync_struct	*fasync_list;
-	struct file		*file;
+	struct file		*file; // псевдо-файл для чтения/записи, пока не понимаю зачем это нужно
 	struct sock		*sk;
 	wait_queue_head_t	wait;
-	short			type;
+	short			type; // протокол
 };
 
 struct vm_area_struct;
@@ -130,6 +132,8 @@ struct sockaddr;
 struct msghdr;
 struct module;
 
+// а это какие могут быть операции над сокетом, для каждого протокола свой набор
+// структуры создаются и регистрируются при регистрации протокола
 struct proto_ops {
 	int		family;
 	struct module	*owner;
